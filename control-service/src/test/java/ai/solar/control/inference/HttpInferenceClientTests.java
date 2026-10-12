@@ -27,6 +27,7 @@ class HttpInferenceClientTests {
 	private HttpServer server;
 	private final AtomicReference<String> receivedBody = new AtomicReference<>();
 	private final AtomicReference<String> receivedPath = new AtomicReference<>();
+	private final AtomicReference<String> receivedKey = new AtomicReference<>();
 	private volatile int status = 200;
 	private volatile String reply = Fixtures.rotatePayloadText();
 	private volatile long delayMillis = 0;
@@ -37,6 +38,7 @@ class HttpInferenceClientTests {
 		server.createContext("/", exchange -> {
 			receivedPath.set(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath());
 			receivedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+			receivedKey.set(exchange.getRequestHeaders().getFirst("X-API-Key"));
 			try {
 				Thread.sleep(delayMillis);
 			}
@@ -60,8 +62,12 @@ class HttpInferenceClientTests {
 	}
 
 	private HttpInferenceClient client(Duration readTimeout) {
+		return client(readTimeout, null);
+	}
+
+	private HttpInferenceClient client(Duration readTimeout, String apiKey) {
 		URI baseUrl = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
-		SolarProperties properties = new SolarProperties(new SolarProperties.Inference(baseUrl, Duration.ofSeconds(2), readTimeout),
+		SolarProperties properties = new SolarProperties(new SolarProperties.Inference(baseUrl, Duration.ofSeconds(2), readTimeout, apiKey),
 				new SolarProperties.Row("row-001", 35), new SolarProperties.Schedule(false, "0 5 * * * *", "live"));
 		return new HttpInferenceClient(RestClient.builder(), properties, JsonMapper.builder().build());
 	}
@@ -100,6 +106,40 @@ class HttpInferenceClientTests {
 				assertThat(ex.reason()).isEqualTo(Reason.REJECTED);
 				assertThat(ex.getMessage()).isEqualTo("No recorded hour '1999-01-01T00:00:00Z'");
 			});
+	}
+
+	@Test
+	void sendsTheConfiguredApiKey() {
+		client(Duration.ofSeconds(5), "key-for-the-inference-api").recommend(new InferenceRequest("recorded", null, 35, false));
+
+		assertThat(receivedKey.get()).isEqualTo("key-for-the-inference-api");
+	}
+
+	@Test
+	void sendsNoKeyHeaderWhenNoneIsConfigured() {
+		client(Duration.ofSeconds(5), " ").recommend(new InferenceRequest("recorded", null, 35, false));
+
+		assertThat(receivedKey.get()).isNull();
+	}
+
+	@Test
+	void aRefusedKeyIsThisServicesProblemNotTheCallers() {
+		status = 401;
+		reply = "{\"error\": {\"code\": \"UNAUTHORIZED\", \"message\": \"A valid X-API-Key header is required\"}}";
+
+		assertThatThrownBy(() -> client().recommend(new InferenceRequest("recorded", null, 35, false)))
+			.isInstanceOfSatisfying(InferenceException.class, ex -> {
+				assertThat(ex.reason()).isEqualTo(Reason.UNAVAILABLE);
+				assertThat(ex.getMessage()).contains("SOLAR_INFERENCE_API_KEY");
+			});
+	}
+
+	@Test
+	void theKeyIsNeverPrintedWithTheSettings() {
+		SolarProperties.Inference settings = new SolarProperties.Inference(URI.create("http://inference.test"), Duration.ofSeconds(1),
+				Duration.ofSeconds(1), "key-for-the-inference-api");
+
+		assertThat(settings.toString()).doesNotContain("key-for-the-inference-api").contains("<set>");
 	}
 
 	@Test

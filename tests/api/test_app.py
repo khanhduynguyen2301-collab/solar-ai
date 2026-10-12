@@ -75,9 +75,9 @@ class ApiTestCase(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.models, cls.hours = SHARED["models"], SHARED["hours"]
 
-    def client(self, *, reasoner=None, hours="default", rate_limit=0, external_rate_limit=0, loader=None, **options) -> TestClient:
+    def client(self, *, reasoner=None, hours="default", rate_limit=0, external_rate_limit=0, loader=None, api_key="", **options) -> TestClient:
         service = InferenceService(self.models, self.hours if hours == "default" else hours, DEFAULT_CONFIG, reasoner=reasoner, weather_tools=FakeWeatherTools())
-        app = create_app(loader or (lambda: service), rate_limit_per_minute=rate_limit, external_rate_limit_per_minute=external_rate_limit, cors_origins=["http://localhost:3000"])
+        app = create_app(loader or (lambda: service), rate_limit_per_minute=rate_limit, external_rate_limit_per_minute=external_rate_limit, cors_origins=["http://localhost:3000"], api_key=api_key)
         client = TestClient(app, **options)
         client.__enter__()
         self.addCleanup(client.__exit__, None, None, None)
@@ -292,3 +292,59 @@ class CorsTest(ApiTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+API_KEY = "test-key-0123456789-abcdefghij"
+
+
+class ApiKeyTest(ApiTestCase):
+    def test_protected_endpoints_refuse_a_request_with_no_key(self) -> None:
+        client = self.client(api_key=API_KEY)
+
+        for response in (client.get("/models"), client.get("/hours"), client.post("/recommendations", json={})):
+            self.assertEqual(response.status_code, 401)
+            self.assertEqual(response.json()["error"]["code"], "UNAUTHORIZED")
+
+    def test_a_wrong_key_is_refused_and_the_real_key_is_not_echoed(self) -> None:
+        response = self.client(api_key=API_KEY).post("/recommendations", json={}, headers={"X-API-Key": API_KEY[:-1] + "x"})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn(API_KEY, response.text)
+
+    def test_the_right_key_gets_a_decision(self) -> None:
+        client = self.client(api_key=API_KEY)
+        headers = {"X-API-Key": API_KEY}
+
+        response = client.post("/recommendations", json={}, headers=headers)
+
+        self.assertEqual(response.status_code, 200)
+        validate_frontend_data(response.json())
+        self.assertEqual(client.get("/models", headers=headers).status_code, 200)
+        self.assertEqual(client.get("/hours", headers=headers).status_code, 200)
+
+    def test_health_and_ready_stay_open_so_a_host_can_probe_them(self) -> None:
+        client = self.client(api_key=API_KEY)
+
+        self.assertEqual(client.get("/health").status_code, 200)
+        self.assertEqual(client.get("/ready").status_code, 200)
+
+    def test_an_unauthorised_request_does_not_use_up_the_rate_limit(self) -> None:
+        client = self.client(api_key=API_KEY, rate_limit=1)
+
+        self.assertEqual(client.post("/recommendations", json={}).status_code, 401)
+        self.assertEqual(client.post("/recommendations", json={}, headers={"X-API-Key": API_KEY}).status_code, 200)
+
+    def test_with_no_key_configured_the_api_is_open(self) -> None:
+        self.assertEqual(self.client().post("/recommendations", json={}).status_code, 200)
+
+    def test_a_short_key_stops_the_server_from_starting(self) -> None:
+        with self.assertRaisesRegex(ValueError, "SOLAR_API_KEY must be at least"):
+            create_app(lambda: None, api_key="too-short")
+
+    def test_a_browser_may_send_the_key_header(self) -> None:
+        response = self.client(api_key=API_KEY).options("/recommendations", headers={
+            "origin": "http://localhost:3000", "access-control-request-method": "POST", "access-control-request-headers": "x-api-key",
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("x-api-key", response.headers["access-control-allow-headers"].lower())

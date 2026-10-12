@@ -190,13 +190,13 @@ Every pull request and every push to `main` runs both suites on GitHub Actions, 
 
 **Delivery.** On a push to `main` or a version tag (`v*`), the images that passed those steps are published to the GitHub container registry as `ghcr.io/khanhduynguyen2301-collab/solar-ai` (Python API) and `ghcr.io/khanhduynguyen2301-collab/solar-ai-control-service` (Java control service), tagged `latest` (or the version) and `sha-<commit>`. Pull requests are tested but never published. The dashboard is deployed separately by Vercel on every push to `main`.
 
-**Backend: 495 tests** (Python `unittest`)
+**Backend: 503 tests** (Python `unittest`)
 
 | Area | Tests | What is checked |
 | --- | --- | --- |
 | Agents, orchestrator, LLM reasoning, live Data Agent | 128 | Tool coordination, the decision rule (STOW, HOLD, ROTATE), failure routing, and that the LLM cannot change a result |
 | Models, evaluation, optimizer and saved models | 131 | Training smoke tests, no data leakage in LSTM sequences, metric math, model selection, net-benefit optimization, and that a loaded model predicts exactly as the trained one and a damaged file is refused |
-| HTTP API | 32 | Valid payloads, strict input validation, the error envelope, rate limits, starting without models, and the load-test arithmetic |
+| HTTP API | 40 | Valid payloads, strict input validation, the error envelope, the API key check, rate limits, starting without models, and the load-test arithmetic |
 | Weather pipeline | 61 | Provider mapping, validation, transform, solar position |
 | Dataset loading and example data | 59 | Delivered splits are never re-split, chronological order, labels never used as features |
 | Database storage | 32 | PostgreSQL persistence; 23 of these skip when no database is running |
@@ -205,7 +205,7 @@ Every pull request and every push to `main` runs both suites on GitHub Actions, 
 
 **Frontend: 459 tests** (Vitest, 22 files): 396 logic and schema tests and 63 page and component render tests.
 
-**Control service: 37 tests** (JUnit 5): the decision flow against a real database schema, the HTTP client against a local test server (request shape, status mapping, timeouts), the scheduler, and the error handling.
+**Control service: 41 tests** (JUnit 5): the decision flow against a real database schema, the HTTP client against a local test server (request shape, status mapping, timeouts), the scheduler, and the error handling.
 
 | Check | Where | Typical time |
 | --- | --- | --- |
@@ -359,7 +359,7 @@ Request fields, all optional: `mode` (`recorded` or `live`), `timestamp` (a reco
 - **Errors** use one shape, `{"error": {"code", "message"}}`, and never include internals.
 - **Rate limits** are per client address: 120 requests a minute, and 6 a minute for `live` or `explain` requests, which call outside services. Change them with `SOLAR_API_RATE_LIMIT_PER_MINUTE` and `SOLAR_API_EXTERNAL_RATE_LIMIT_PER_MINUTE` (0 turns a limit off).
 - **Browser access** is allowed from `http://localhost:3000` only; set `SOLAR_API_CORS_ORIGINS` to change it.
-- **No authentication.** Put it behind your own gateway before exposing it publicly.
+- **Authentication** is one shared key, off by default. Set `SOLAR_API_KEY` on the server and callers must send it in an `X-API-Key` header; `/health` and `/ready` stay open. Set it before exposing the API publicly.
 
 ### Option 5: run the API with Docker
 
@@ -443,8 +443,8 @@ cd ..\control-service
 - Linear regression and random forest are not implemented.
 - The LSTM is not used in a live run because it needs look-back weather history.
 - The control service stores decision history, but the dashboard does not read it yet; its history list is still empty for generated runs.
-- The control service has no authentication, is not hosted, and serializes applied decisions in memory, so it must run as a single instance.
-- The API has no authentication and is not hosted publicly; the live demo is still a static site showing one recorded run.
+- The control service has no authentication on its own endpoints, is not hosted, and serializes applied decisions in memory, so it must run as a single instance.
+- The API's authentication is a single shared key (no per-user keys, expiry or revocation), and it is not hosted publicly; the live demo is still a static site showing one recorded run.
 - The API's rate limiter is in memory per process, so with several worker processes each one counts separately.
 
 ## Repository guide

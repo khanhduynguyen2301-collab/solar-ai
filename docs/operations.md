@@ -23,7 +23,7 @@ One workflow, [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), runs on
 | Backend tests | Python 3.11, CPU build of PyTorch, the full `unittest` suite |
 | Frontend checks | Node 24: type check, lint, Vitest, production build |
 | Control service tests (Java) | Java 21: `./mvnw verify` |
-| Docker images | Runs after the three above pass. **Backend image:** builds it, starts the container, waits for `/ready`, requests a recommendation, checks an invalid request is rejected with 422, runs a short load test, and runs a one-off file generation. **Control service image:** builds it, starts it with a PostgreSQL container and the API container, requests an applied decision and a what-if question, checks the simulated row and the totals, checks an invalid request is rejected with 422, then restarts it and checks the history is still there and the container reports healthy |
+| Docker images | Runs after the three above pass. **Backend image:** builds it, starts the container, waits for `/ready`, requests a recommendation, checks an invalid request is rejected with 422, starts a second container that requires an API key and checks it answers 401 without the key and 200 with it, runs a short load test, and runs a one-off file generation. **Control service image:** builds it, starts it with a PostgreSQL container and the key-protected API container, requests an applied decision and a what-if question, checks the simulated row and the totals, checks an invalid request is rejected with 422, then restarts it and checks the history is still there and the container reports healthy |
 
 Tests use the committed mock, example and seasonal-sample data. They never call the LLM or the network. Tests that need a running PostgreSQL skip themselves.
 
@@ -83,6 +83,8 @@ Vercel builds `frontend/` from the fork's `main`. The pages are static: the payl
 | `SOLAR_API_RATE_LIMIT_PER_MINUTE` | API | `120` | Requests per client per minute; `0` for none |
 | `SOLAR_API_EXTERNAL_RATE_LIMIT_PER_MINUTE` | API | `6` | Same, for live or explained requests |
 | `SOLAR_API_CORS_ORIGINS` | API | `http://localhost:3000` | Browser origins allowed |
+| `SOLAR_API_KEY` | API, load test | none | When set, callers must send this key in `X-API-Key` |
+| `SOLAR_INFERENCE_API_KEY` | Control service | none | The key it sends to the inference API |
 | `SOLAR_INFERENCE_URL` | Control service | `http://localhost:8000` | Where the inference API is |
 | `SOLAR_SCHEDULE_ENABLED`, `SOLAR_SCHEDULE_CRON`, `SOLAR_SCHEDULE_MODE` | Control service | `false`, `0 5 * * * *`, `live` | Hourly automatic decisions |
 | `SOLAR_DB_URL`, `SOLAR_DB_USER`, `SOLAR_DB_PASSWORD` | Control service | local PostgreSQL | Its database |
@@ -110,7 +112,7 @@ These apply to the laptop the project was built on, not to the project in genera
 
 ## Known gaps
 
-- No authentication on either service, and neither is hosted.
+- The API's authentication is one shared key, off unless `SOLAR_API_KEY` is set. The control service has none on its own endpoints. Neither is hosted.
 - Nothing is deployed from the published images.
 - There is no single command that starts every service together.
 - No measured test-coverage percentage.

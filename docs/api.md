@@ -23,6 +23,8 @@ Add `--workers 4` for more throughput; see [Throughput](#throughput). If no save
 | `GET /hours` | Count, first, last and default of the recorded hours that can be replayed | No |
 | `POST /recommendations` | One decision | Yes |
 
+When the server has an API key set, `/models`, `/hours` and `/recommendations` need it; see [Authentication](#authentication).
+
 ### POST /recommendations
 
 Request body, every field optional:
@@ -68,6 +70,7 @@ Every error has one shape and never includes internal details:
 
 | Status | Code | When |
 | --- | --- | --- |
+| 401 | `UNAUTHORIZED` | The server requires an API key and the `X-API-Key` header is missing or wrong |
 | 404 | `UNKNOWN_HOUR` | `timestamp` is not a recorded hour |
 | 404, 405 | `HTTP_ERROR` | Unknown route or wrong method |
 | 422 | `INVALID_REQUEST` | A field is missing, out of range, of the wrong type, or unknown; or the body is not JSON |
@@ -78,12 +81,27 @@ Every error has one shape and never includes internal details:
 | 503 | `RECORDED_HOURS_UNAVAILABLE` | The models' dataset is not on this server |
 | 503 | `EXPLANATIONS_UNAVAILABLE` | `explain` was true but no LLM key is configured |
 
+## Authentication
+
+One shared API key, off by default:
+
+- Set `SOLAR_API_KEY` on the server (24 characters or more; a shorter one stops the server from starting). Every request to `/models`, `/hours` and `/recommendations` must then send it in an `X-API-Key` header, or it gets 401.
+- `/health` and `/ready` stay open so a host can probe them. The interactive documentation at `/docs` also stays open; it describes the API but cannot call it without the key.
+- With no key set, the API is open to anyone who can reach it, and the server logs a warning at startup. That is meant for local use.
+- A request without a valid key is refused before it is counted against the rate limit.
+
+```powershell
+curl.exe -X POST http://localhost:8000/recommendations -H "content-type: application/json" -H "X-API-Key: $env:SOLAR_API_KEY" -d '{}'
+```
+
+Generate a key with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. It is one key for every caller: there are no per-user keys, no expiry and no way to revoke it except changing it and restarting.
+
 ## Limits and access
 
 - **Rate limits** are per client address over a sliding minute: 120 requests, and 6 for `live` or `explain` requests, which call an outside service (one of them paid). A limit of 0 turns it off.
 - **The limiter is in memory, per process.** With several worker processes each one counts separately, and a restart clears it.
 - **Browser access (CORS)** is allowed from `http://localhost:3000` only, unless configured.
-- **There is no authentication.** Do not expose the API publicly without a gateway or an API-key check in front of it.
+- **Set an API key before exposing the API publicly.** Without one it is open; see [Authentication](#authentication).
 - The connecting address is used as the client identity. Behind a proxy, rate-limit at the proxy.
 
 ## Settings
@@ -94,6 +112,7 @@ Every error has one shape and never includes internal details:
 | `SOLAR_API_RATE_LIMIT_PER_MINUTE` | `120` | Requests per client per minute; `0` for no limit |
 | `SOLAR_API_EXTERNAL_RATE_LIMIT_PER_MINUTE` | `6` | Same, for `live` or `explain` requests |
 | `SOLAR_API_CORS_ORIGINS` | `http://localhost:3000` | Comma-separated origins allowed to call from a browser |
+| `SOLAR_API_KEY` | none | When set, the key callers must send in `X-API-Key` |
 | `ANTHROPIC_API_KEY` | none | Enables `explain`. Read from the environment or the repository's `.env` |
 | `SOLAR_LLM_MODEL` | `claude-haiku-4-5-20251001` | Model used for explanations |
 
@@ -116,4 +135,4 @@ Measured on a 16-CPU laptop with the load generator on the same machine, full da
 
 One process tops out near 59 requests per second because the work is Python code that runs on one core at a time. More worker processes raise the ceiling. These are not capacity figures.
 
-To run the load test, start the server with `SOLAR_API_RATE_LIMIT_PER_MINUTE=0`, then run `python -m scripts.load_test`.
+To run the load test, start the server with `SOLAR_API_RATE_LIMIT_PER_MINUTE=0`, then run `python -m scripts.load_test`. If the server requires a key, set `SOLAR_API_KEY` for the script too.

@@ -10,21 +10,26 @@ Endpoints:
     GET  /hours             the recorded hours that can be replayed
     POST /recommendations   one decision, as the same FrontendData the dashboard reads
 
+When SOLAR_API_KEY is set, every endpoint except /health and /ready needs that
+key in an X-API-Key header. With no key set the API is open, for local use.
+
 The decision never waits on an LLM unless the request asks for explanations.
 Requests that reach an outside service (live weather, LLM) have their own,
 much lower rate limit. Errors use one envelope: {"error": {"code", "message"}}.
 """
 
 from contextlib import asynccontextmanager
+import hmac
 import logging
 import os
 from pathlib import Path
 from typing import Callable, Literal
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import torch
@@ -43,6 +48,10 @@ MODEL_DIR_VARIABLE = "SOLAR_MODEL_DIR"
 RATE_LIMIT_VARIABLE = "SOLAR_API_RATE_LIMIT_PER_MINUTE"
 EXTERNAL_RATE_LIMIT_VARIABLE = "SOLAR_API_EXTERNAL_RATE_LIMIT_PER_MINUTE"
 CORS_ORIGINS_VARIABLE = "SOLAR_API_CORS_ORIGINS"
+API_KEY_VARIABLE = "SOLAR_API_KEY"
+API_KEY_HEADER = "X-API-Key"
+# A shorter key is refused at startup, so a guessable one is never accepted by mistake.
+MIN_API_KEY_LENGTH = 24
 DEFAULT_RATE_LIMIT_PER_MINUTE = 120
 # Live weather and LLM explanations call outside services, one of which costs money per call.
 DEFAULT_EXTERNAL_RATE_LIMIT_PER_MINUTE = 6
@@ -80,12 +89,18 @@ def _error(status: int, code: str, message: str, headers: dict[str, str] | None 
 def create_app(
     service_loader: ServiceLoader = load_default_service, *,
     rate_limit_per_minute: int | None = None, external_rate_limit_per_minute: int | None = None, cors_origins: list[str] | None = None,
+    api_key: str | None = None,
 ) -> FastAPI:
+    required_key = (os.environ.get(API_KEY_VARIABLE) or "") if api_key is None else api_key
+    if required_key and len(required_key) < MIN_API_KEY_LENGTH:
+        raise ValueError(f"{API_KEY_VARIABLE} must be at least {MIN_API_KEY_LENGTH} characters")
     limiter = RateLimiter(_limit(RATE_LIMIT_VARIABLE, DEFAULT_RATE_LIMIT_PER_MINUTE) if rate_limit_per_minute is None else rate_limit_per_minute)
     external_limiter = RateLimiter(_limit(EXTERNAL_RATE_LIMIT_VARIABLE, DEFAULT_EXTERNAL_RATE_LIMIT_PER_MINUTE) if external_rate_limit_per_minute is None else external_rate_limit_per_minute)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        if not required_key:
+            LOGGER.warning("%s is not set: anyone who can reach this API can use it", API_KEY_VARIABLE)
         # A server with no usable models still starts, so /health and /ready can say what is wrong.
         try:
             app.state.service, app.state.unavailable_reason = service_loader(), None
@@ -96,7 +111,7 @@ def create_app(
 
     app = FastAPI(title="Solar Farm AI recommendation API", version="0.1.0", lifespan=lifespan, description=__doc__)
     origins = cors_origins if cors_origins is not None else [origin.strip() for origin in (os.environ.get(CORS_ORIGINS_VARIABLE) or DEFAULT_CORS_ORIGINS).split(",") if origin.strip()]
-    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST"], allow_headers=["content-type"])
+    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST"], allow_headers=["content-type", API_KEY_HEADER])
 
     # Starlette's own errors (unknown route, wrong method) are included, so every error uses the envelope.
     @app.exception_handler(StarletteHTTPException)
@@ -117,6 +132,15 @@ def create_app(
 
     def fail(status: int, code: str, message: str, headers: dict[str, str] | None = None) -> HTTPException:
         return HTTPException(status, {"code": code, "message": message}, headers)
+
+    key_header = APIKeyHeader(name=API_KEY_HEADER, auto_error=False, description=f"Required when the server has {API_KEY_VARIABLE} set.")
+
+    def require_key(supplied: str | None = Depends(key_header)) -> None:
+        # Compared in constant time, so response timing does not reveal how much of a guess was right.
+        if required_key and not (supplied and hmac.compare_digest(supplied.encode(), required_key.encode())):
+            raise fail(401, "UNAUTHORIZED", f"A valid {API_KEY_HEADER} header is required")
+
+    protected = [Depends(require_key)]
 
     def service_or_503(request: Request) -> InferenceService:
         service = request.app.state.service
@@ -139,7 +163,7 @@ def create_app(
         service = service_or_503(request)
         return {"status": "ready", "recorded_hours_available": service.hours is not None, "explanations_available": service.can_explain}
 
-    @app.get("/models")
+    @app.get("/models", dependencies=protected)
     def models(request: Request) -> dict:
         service = service_or_503(request)
         comparison = service.models.tools.evaluate_models()
@@ -151,14 +175,14 @@ def create_app(
             "validation_comparison": comparison,
         }
 
-    @app.get("/hours")
+    @app.get("/hours", dependencies=protected)
     def hours(request: Request) -> dict:
         service = service_or_503(request)
         if service.hours is None:
             raise fail(503, "RECORDED_HOURS_UNAVAILABLE", f"Dataset {service.models.info.dataset_name} is not available on this server")
         return {"count": len(service.hours.by_timestamp), "first": service.hours.first, "last": service.hours.last, "default": service.hours.default_timestamp}
 
-    @app.post("/recommendations")
+    @app.post("/recommendations", dependencies=protected)
     def recommend(body: RecommendationRequest, request: Request) -> dict:
         service = service_or_503(request)
         check_rate(request, limiter, "requests")
