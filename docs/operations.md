@@ -23,7 +23,7 @@ One workflow, [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), runs on
 | Backend tests | Python 3.11, CPU build of PyTorch, the full `unittest` suite |
 | Frontend checks | Node 24: type check, lint, Vitest, production build |
 | Control service tests (Java) | Java 21: `./mvnw verify` |
-| Backend Docker image | Runs after the three above pass. Builds the image, starts the container, waits for `/ready`, requests a recommendation, checks an invalid request is rejected with 422, runs a short load test, and runs a one-off file generation |
+| Docker images | Runs after the three above pass. **Backend image:** builds it, starts the container, waits for `/ready`, requests a recommendation, checks an invalid request is rejected with 422, runs a short load test, and runs a one-off file generation. **Control service image:** builds it, starts it with a PostgreSQL container and the API container, requests an applied decision and a what-if question, checks the simulated row and the totals, checks an invalid request is rejected with 422, then restarts it and checks the history is still there and the container reports healthy |
 
 Tests use the committed mock, example and seasonal-sample data. They never call the LLM or the network. Tests that need a running PostgreSQL skip themselves.
 
@@ -32,11 +32,12 @@ Tests use the committed mock, example and seasonal-sample data. They never call 
 | What | When | Where it goes |
 | --- | --- | --- |
 | Backend image | Push to `main`, or a `v*` tag, after every job has passed | `ghcr.io/khanhduynguyen2301-collab/solar-ai`, tagged `sha-<commit>` and either `latest` or the version |
+| Control service image | Same | `ghcr.io/khanhduynguyen2301-collab/solar-ai-control-service`, same tags |
 | Dashboard | Every push to `main` of the fork | Vercel, at https://solar-ai-chi.vercel.app |
 
-The image that is published is the exact one the container steps just tested, not a rebuild. Pull requests are tested but never published. Publishing uses the workflow's own token; there are no stored secrets.
+The images that are published are the exact ones the container steps just tested, not rebuilds. Pull requests are tested but never published. Publishing uses the workflow's own token; there are no stored secrets.
 
-The control service is tested in CI but has no image and is not deployed.
+Published means stored in the registry. Nothing pulls the images and runs them on a server: neither service is deployed.
 
 ### Releasing a version
 
@@ -45,7 +46,7 @@ git tag v0.2.0
 git push fork v0.2.0
 ```
 
-The tag run publishes the image as `:v0.2.0`.
+The tag run publishes both images as `:v0.2.0`.
 
 ## The backend image
 
@@ -59,6 +60,12 @@ docker run --rm -p 8000:8000 ghcr.io/khanhduynguyen2301-collab/solar-ai:latest
 - Contains no API key and not the full dataset. Pass `-e ANTHROPIC_API_KEY=...` for explanations. To serve full-dataset models, train them locally and mount `models/artifacts` and the dataset as read-only volumes; the README has the exact options.
 
 The image has only ever been built and run in CI. It has not been run on a developer machine.
+
+## The control service image
+
+Built from [`control-service/Dockerfile`](../control-service/Dockerfile) in two stages: a JDK stage packages the jar with the Maven wrapper, and the final image holds only the jar and a Java 21 runtime. It runs as an unprivileged user, has a health check on `/actuator/health`, and contains no database password and no data. The inference API address and the database are given at run time; see [control-service.md](control-service.md#run-it-with-docker).
+
+Like the backend image, it has only been built and run in CI.
 
 ## The dashboard deployment
 
@@ -104,7 +111,7 @@ These apply to the laptop the project was built on, not to the project in genera
 ## Known gaps
 
 - No authentication on either service, and neither is hosted.
-- The control service has no Docker image and has not been run against PostgreSQL.
+- Nothing is deployed from the published images.
 - There is no single command that starts every service together.
 - No measured test-coverage percentage.
 - No security review has been done of the code that accepts outside input.

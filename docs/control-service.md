@@ -35,6 +35,20 @@ Start the inference API first, then from `control-service/`:
 
 The `local` profile stores data in a file database under `control-service/data/`, so nothing else needs installing. Without the profile the service expects PostgreSQL. It listens on port 8080. `GET /actuator/health` reports whether it is up.
 
+## Run it with Docker
+
+CI publishes the image from `main`. It needs the inference API and a PostgreSQL database to exist already:
+
+```powershell
+docker run --rm -p 8080:8080 `
+  -e SOLAR_INFERENCE_URL=http://host.docker.internal:8000 `
+  -e SOLAR_DB_URL=jdbc:postgresql://host.docker.internal:5432/solar_farm_ai `
+  -e SOLAR_DB_USER=solar_dev -e SOLAR_DB_PASSWORD=your-password `
+  ghcr.io/khanhduynguyen2301-collab/solar-ai-control-service:latest
+```
+
+The image holds only the jar and a Java 21 runtime, runs as an unprivileged user, and has a health check on `/actuator/health`. It has only been built and run in CI.
+
 ## Endpoints
 
 | Method and path | Purpose |
@@ -138,7 +152,7 @@ cd control-service
 
 ## Limits
 
-- **Not run against PostgreSQL yet.** Tests and manual runs used H2 in PostgreSQL-compatibility mode. The migration is written for PostgreSQL but has not been executed on it.
+- **PostgreSQL is exercised in CI only.** The unit tests and manual runs use H2 in PostgreSQL-compatibility mode. On every CI run the container starts against a real PostgreSQL, applies the migration, stores two decisions and reads them back after a restart; nothing beyond that has been tried on PostgreSQL.
 - **Single instance only**, because of the in-memory lock on applied decisions.
 - **No authentication**, and it is not hosted.
 - **The dashboard does not read it yet.**

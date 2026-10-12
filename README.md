@@ -186,9 +186,9 @@ This replay scores the selected model's choices with that model's own prediction
 
 ## Testing
 
-Every pull request and every push to `main` runs both suites on GitHub Actions, plus a frontend type check, lint and production build, and then builds the backend image and exercises it over HTTP. Tests never call the LLM or the network.
+Every pull request and every push to `main` runs both suites on GitHub Actions, plus a frontend type check, lint and production build, and then builds the two service images and runs them together over HTTP with a real PostgreSQL. Tests never call the LLM or the network.
 
-**Delivery.** On a push to `main` or a version tag (`v*`), the image that passed those steps is published to the GitHub container registry as `ghcr.io/khanhduynguyen2301-collab/solar-ai`, tagged `latest` (or the version) and `sha-<commit>`. Pull requests are tested but never published. The dashboard is deployed separately by Vercel on every push to `main`.
+**Delivery.** On a push to `main` or a version tag (`v*`), the images that passed those steps are published to the GitHub container registry as `ghcr.io/khanhduynguyen2301-collab/solar-ai` (Python API) and `ghcr.io/khanhduynguyen2301-collab/solar-ai-control-service` (Java control service), tagged `latest` (or the version) and `sha-<commit>`. Pull requests are tested but never published. The dashboard is deployed separately by Vercel on every push to `main`.
 
 **Backend: 495 tests** (Python `unittest`)
 
@@ -405,6 +405,8 @@ The `local` profile uses a file database, so nothing else needs installing. With
 | `GET /api/stats` | Counts by action and the summed reported net benefit of applied rotations |
 | `GET /api/row` | The simulated row position |
 
+It is also published as a Docker image, `ghcr.io/khanhduynguyen2301-collab/solar-ai-control-service`; [docs/control-service.md](docs/control-service.md#run-it-with-docker) has the run command.
+
 Set `SOLAR_SCHEDULE_ENABLED=true` to have it request a decision every hour (`SOLAR_SCHEDULE_CRON`, `SOLAR_SCHEDULE_MODE`). The row position is simulated: no hardware reports it, and the stored net benefit is the model's prediction, not measured energy.
 
 ### Run the tests
@@ -459,7 +461,7 @@ cd ..\control-service
 | `frontend/` | Next.js dashboard |
 | `scripts/` | Training, run, evaluation, benchmark, load-test and data-building commands |
 | `tests/` | Backend test suite |
-| `.github/workflows/ci.yml` | CI and delivery: backend tests, frontend checks, backend image build, smoke test and publish |
+| `.github/workflows/ci.yml` | CI and delivery: backend, frontend and Java tests, then both service images built, run together and published |
 | `Dockerfile` | Backend image that serves the API |
 | `docs/` | Reference documentation; start at `docs/README.md` |
 
