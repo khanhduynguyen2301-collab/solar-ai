@@ -68,7 +68,7 @@ The system has three parts that meet at two contracts:
 
 The dashboard is a static site: it reads the payload file at build time, so the deployed demo needs no server, database or API key.
 
-**Stack:** Python 3.11, PyTorch, XGBoost, FastAPI, pandas, pvlib · Next.js, React, TypeScript, React Three Fiber, Zod · Anthropic API for explanations · GitHub Actions for CI · Vercel for the dashboard.
+**Stack:** Python 3.11, PyTorch, XGBoost, FastAPI, pandas, pvlib · Java 21, Spring Boot, JPA, Flyway, PostgreSQL · Next.js, React, TypeScript, React Three Fiber, Zod · Anthropic API for explanations · GitHub Actions for CI · Vercel for the dashboard.
 
 ## System design
 
@@ -188,6 +188,8 @@ Every pull request and every push to `main` runs both suites on GitHub Actions, 
 | End-to-end slice | 22 | Data to trained model to agents to a validated dashboard payload |
 
 **Frontend: 459 tests** (Vitest, 22 files): 396 logic and schema tests and 63 page and component render tests.
+
+**Control service: 37 tests** (JUnit 5): the decision flow against a real database schema, the HTTP client against a local test server (request shape, status mapping, timeouts), the scheduler, and the error handling.
 
 | Check | Where | Typical time |
 | --- | --- | --- |
@@ -366,6 +368,29 @@ The API is then at http://localhost:8000. The image trains its models at build t
 | Serve models trained on the full dataset | Train them locally, then add `-v "${PWD}/models/artifacts:/app/models/artifacts:ro"` and mount the dataset with `-v "<path to gem_2023_2025>:/app/data/generated/gem_2023_2025:ro"` |
 | Write one recommendation file instead of serving | `docker run --rm -v "${PWD}/out:/out" solar-ai-backend python -m scripts.run_recommendation --skip-lstm --output /out/recommendation.json` |
 
+### Option 6: run the control service (Java)
+
+A Spring Boot service that sits in front of the Python API. It decides nothing itself: it asks the Python API for decisions, stores every one, and tracks the simulated position of the controlled row so each request starts where the last one left it.
+
+Start the Python API first (Option 4), then from `control-service/`:
+
+```powershell
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=local"
+```
+
+The `local` profile uses a file database, so nothing else needs installing. Without it the service expects PostgreSQL (`SOLAR_DB_URL`, `SOLAR_DB_USER`, `SOLAR_DB_PASSWORD`). It listens on http://localhost:8080.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/decisions` | Request a decision and store it. With no `currentAngleDeg` it starts from the simulated row position and then updates it; with one it is a what-if question that leaves the row alone |
+| `GET /api/decisions` | History, newest first; filter by `action`, `from`, `to`; page with `page` and `size` |
+| `GET /api/decisions/{id}` and `/payload` | One stored decision, and the full payload the Python API returned |
+| `GET /api/decisions/latest/payload` | The newest payload, in the format the dashboard reads |
+| `GET /api/stats` | Counts by action and the summed reported net benefit of applied rotations |
+| `GET /api/row` | The simulated row position |
+
+Set `SOLAR_SCHEDULE_ENABLED=true` to have it request a decision every hour (`SOLAR_SCHEDULE_CRON`, `SOLAR_SCHEDULE_MODE`). The row position is simulated: no hardware reports it, and the stored net benefit is the model's prediction, not measured energy.
+
 ### Run the tests
 
 ```powershell
@@ -373,6 +398,9 @@ The API is then at http://localhost:8000. The image trains its models at build t
 
 cd frontend
 npm test
+
+cd ..\control-service
+.\mvnw.cmd test
 ```
 
 ## What is real and what is simulated
@@ -396,7 +424,8 @@ npm test
   interim live agent in `src/service/live_data_agent.py` built on the pipeline tools.
 - Linear regression and random forest are not implemented.
 - The LSTM is not used in a live run because it needs look-back weather history.
-- There is no decision history yet; the dashboard's history list is empty for generated runs.
+- The control service stores decision history, but the dashboard does not read it yet; its history list is still empty for generated runs.
+- The control service has no authentication, is not hosted, and serializes applied decisions in memory, so it must run as a single instance.
 - The API has no authentication and is not hosted publicly; the live demo is still a static site showing one recorded run.
 - The API's rate limiter is in memory per process, so with several worker processes each one counts separately.
 
@@ -409,6 +438,7 @@ npm test
 | `src/agents/` | The agents, orchestrator, trace recording and LLM reasoning |
 | `src/service/` | Recommendation service and the interim live Data Agent |
 | `src/api/` | HTTP API, request limits and the inference service |
+| `control-service/` | Java (Spring Boot) service: decision history, scheduling and the simulated row position |
 | `src/common/` | Shared contracts, schema and configuration |
 | `frontend/` | Next.js dashboard |
 | `scripts/` | Training, run, evaluation, benchmark, load-test and data-building commands |
