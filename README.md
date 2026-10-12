@@ -463,6 +463,7 @@ cd ..\control-service
 | `tests/` | Backend test suite |
 | `.github/workflows/ci.yml` | CI and delivery: backend, frontend and Java tests, then both service images built, run together and published |
 | `Dockerfile` | Backend image that serves the API |
+| `deploy/` | One-time Google Cloud setup for hosting the API on Cloud Run (written, not yet run) |
 | `docs/` | Reference documentation; start at `docs/README.md` |
 
 ## Documentation

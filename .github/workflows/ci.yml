@@ -1,7 +1,8 @@
 name: CI
 
 # Every pull request is tested. A push to main, or a version tag such as v0.2.0, is tested and then
-# the two service images that passed are published to the GitHub container registry.
+# the two service images that passed are published to the GitHub container registry. A push to main
+# then deploys the API image to Cloud Run, if the repository has been connected to a Google Cloud project.
 on:
   push:
     branches: [main]
@@ -269,3 +270,70 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+  deploy-api:
+    name: Deploy API to Cloud Run
+    # Deployment: only from main, only after the image was tested and published, and only once the
+    # repository has been connected to a Google Cloud project (see deploy/cloud-run-setup.sh).
+    needs: backend-image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GCP_PROJECT_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+      # Lets the job prove to Google Cloud which repository and branch it runs for; no stored cloud key.
+      id-token: write
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+      # Names of secrets held in Google Secret Manager, never their values.
+      CLOUD_RUN_SECRETS: ${{ vars.CLOUD_RUN_SECRETS }}
+      SERVICE: solar-ai-api
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Copy the published image to the project's registry
+        # Cloud Run cannot pull from the GitHub registry, so the exact image published above is copied, not rebuilt.
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          source="ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA::7}"
+          target="${REGION}-docker.pkg.dev/${PROJECT_ID}/solar-ai/api:sha-${GITHUB_SHA::7}"
+          echo "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          docker pull "$source"
+          docker tag "$source" "$target"
+          docker push "$target"
+          echo "IMAGE=$target" >> "$GITHUB_ENV"
+
+      - name: Deploy
+        # One instance at most and none when idle, so cost is bounded and an idle service costs nothing.
+        # The service is reachable by anyone; the API's own key check is what protects it.
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --image="$IMAGE" --region="$REGION" --project="$PROJECT_ID" \
+            --service-account="$RUNTIME_SERVICE_ACCOUNT" \
+            --port=8000 --memory=2Gi --cpu=1 --cpu-boost \
+            --min-instances=0 --max-instances=1 --concurrency=20 --timeout=60 \
+            --set-secrets="$CLOUD_RUN_SECRETS" \
+            --allow-unauthenticated --quiet
+
+      - name: Check the deployed API
+        run: |
+          url="$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT_ID" --format='value(status.url)')"
+          for attempt in $(seq 1 20); do
+            if curl -fsS "$url/ready"; then echo; break; fi
+            sleep 5
+          done
+          curl -fsS "$url/ready" > /dev/null
+          # A request with no key must be refused: a deployment that answers it is misconfigured.
+          status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/recommendations" -H 'content-type: application/json' -d '{}')
+          test "$status" = "401" || { echo "Expected 401 without a key, got $status"; exit 1; }
+          echo "Deployed $IMAGE to $url" >> "$GITHUB_STEP_SUMMARY"

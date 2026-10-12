@@ -37,7 +37,7 @@ Tests use the committed mock, example and seasonal-sample data. They never call 
 
 The images that are published are the exact ones the container steps just tested, not rebuilds. Pull requests are tested but never published. Publishing uses the workflow's own token; there are no stored secrets.
 
-Published means stored in the registry. Nothing pulls the images and runs them on a server: neither service is deployed.
+Published means stored in the registry. The control service is not deployed anywhere. The API is deployed to Google Cloud Run only once the repository has been connected to a Google Cloud project; see [Hosting the API on Cloud Run](#hosting-the-api-on-cloud-run).
 
 ### Releasing a version
 
@@ -66,6 +66,26 @@ The image has only ever been built and run in CI. It has not been run on a devel
 Built from [`control-service/Dockerfile`](../control-service/Dockerfile) in two stages: a JDK stage packages the jar with the Maven wrapper, and the final image holds only the jar and a Java 21 runtime. It runs as an unprivileged user, has a health check on `/actuator/health`, and contains no database password and no data. The inference API address and the database are given at run time; see [control-service.md](control-service.md#run-it-with-docker).
 
 Like the backend image, it has only been built and run in CI.
+
+## Hosting the API on Cloud Run
+
+**Status: written, not yet run.** The deploy job and the setup script exist, but no Google Cloud project has been connected, so the job is skipped and the API is not hosted. Nothing in this section has been exercised yet.
+
+How it is meant to work:
+
+1. **One-time setup.** In Google Cloud Shell, with a project that has billing enabled selected, run [`deploy/cloud-run-setup.sh`](../deploy/cloud-run-setup.sh). It creates an image repository, a deployer account and a runtime account, keyless sign-in that only this repository's `main` branch can use, and the API's secrets in Secret Manager (a generated `SOLAR_API_KEY` and, optionally, the Anthropic key). It prints six repository variables to add on GitHub. No cloud key is stored in GitHub.
+2. **Every push to `main`.** After the images are tested and published, the *Deploy API to Cloud Run* job copies the exact published API image into the project's registry, deploys it, and checks that `/ready` answers and that a request with no key gets 401.
+
+Settings the job applies: 2 GiB memory, 1 CPU, at most one instance, none when idle (so the first request after a pause waits for a cold start), 20 simultaneous requests, public network access with the API key as the only protection.
+
+Things to know:
+
+- **Cost.** Cloud Run and Secret Manager have free allowances that demo traffic stays inside, but a billing account with a card is required. Stored images are billed beyond 0.5 GB; the setup keeps only the two newest, which should cost a few cents a month. Set a budget alert in the billing console.
+- **Rate limits are shared.** Behind Cloud Run every caller appears to come from Google's front end, so the per-client limits act as one limit for everyone: 120 requests a minute, 6 for live or explained requests.
+- **Recorded mode uses the seasonal sample**, because that is what the image is trained on. Its decisions differ from the full-dataset numbers in the README.
+- **Only the API is deployed.** The control service needs a PostgreSQL database and is not hosted.
+
+To stop deploying, delete the `GCP_PROJECT_ID` repository variable. To take the service down, delete it in the Cloud Run console.
 
 ## The dashboard deployment
 
@@ -113,7 +133,7 @@ These apply to the laptop the project was built on, not to the project in genera
 ## Known gaps
 
 - The API's authentication is one shared key, off unless `SOLAR_API_KEY` is set. The control service has none on its own endpoints. Neither is hosted.
-- Nothing is deployed from the published images.
+- Nothing is deployed from the published images yet: the Cloud Run deployment is written but has never run.
 - There is no single command that starts every service together.
 - No measured test-coverage percentage.
 - No security review has been done of the code that accepts outside input.
