@@ -1,7 +1,7 @@
 name: CI
 
 # Every pull request is tested. A push to main, or a version tag such as v0.2.0, is tested and then
-# the backend image that passed is published to the GitHub container registry.
+# the two service images that passed are published to the GitHub container registry.
 on:
   push:
     branches: [main]
@@ -62,18 +62,19 @@ jobs:
         run: ./mvnw --batch-mode verify
 
   backend-image:
-    name: Backend Docker image
+    name: Docker images
     # Waits for the test jobs, so an image is only ever published from a commit whose tests passed.
+    # Builds the Python API image and the Java control service image and runs them together.
     needs: [backend, frontend, control-service]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build image
+      - name: Build the backend image
         # The labels tie the published image to this repository and to the exact commit it was built from.
         run: |
           docker build -t solar-ai-backend \
@@ -84,7 +85,8 @@ jobs:
 
       - name: Start the API container
         run: |
-          docker run -d --name api -p 8000:8000 -e SOLAR_API_RATE_LIMIT_PER_MINUTE=0 solar-ai-backend
+          docker network create solar
+          docker run -d --name api --network solar -p 8000:8000 -e SOLAR_API_RATE_LIMIT_PER_MINUTE=0 solar-ai-backend
           for attempt in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8000/ready; then echo; exit 0; fi
             sleep 2
@@ -115,28 +117,108 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/out:/out" solar-ai-backend python -m scripts.run_recommendation --skip-lstm --no-llm --output /out/recommendation.json
           python -c "import json; d = json.load(open('out/recommendation.json')); print(d['selected_model'], d['decision']['action'])"
 
-      - name: Stop the API container
+      - name: Build the control service image
+        run: |
+          docker build -t solar-ai-control-service \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.description=Solar Farm AI control service" \
+            control-service
+
+      - name: Start PostgreSQL and the control service container
+        # The control service runs here against a real PostgreSQL and the API container started above.
+        # The password exists only inside this job's throwaway network.
+        run: |
+          docker run -d --name db --network solar \
+            -e POSTGRES_DB=solar_farm_ai -e POSTGRES_USER=solar_dev -e POSTGRES_PASSWORD=ci-throwaway \
+            postgres:17.11-bookworm
+          for attempt in $(seq 1 30); do
+            if docker exec db pg_isready -h 127.0.0.1 -U solar_dev -d solar_farm_ai; then break; fi
+            sleep 2
+          done
+          docker run -d --name control --network solar -p 8080:8080 \
+            -e SOLAR_INFERENCE_URL=http://api:8000 \
+            -e SOLAR_DB_URL=jdbc:postgresql://db:5432/solar_farm_ai \
+            -e SOLAR_DB_USER=solar_dev -e SOLAR_DB_PASSWORD=ci-throwaway \
+            solar-ai-control-service
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8080/actuator/health; then echo; exit 0; fi
+            sleep 2
+          done
+          docker logs control
+          exit 1
+
+      - name: Request decisions through the control service
+        run: |
+          status=$(curl -s -o applied.json -w '%{http_code}' -X POST http://127.0.0.1:8080/api/decisions -H 'content-type: application/json' -d '{}')
+          cat applied.json; echo
+          test "$status" = "201"
+          status=$(curl -s -o whatif.json -w '%{http_code}' -X POST http://127.0.0.1:8080/api/decisions -H 'content-type: application/json' -d '{"currentAngleDeg": 60}')
+          cat whatif.json; echo
+          test "$status" = "201"
+          curl -fsS http://127.0.0.1:8080/api/row -o row.json
+          curl -fsS http://127.0.0.1:8080/api/stats -o stats.json
+          cat row.json stats.json; echo
+          python - <<'PY'
+          import json
+          applied, whatif = json.load(open("applied.json")), json.load(open("whatif.json"))
+          row, stats = json.load(open("row.json")), json.load(open("stats.json"))
+          assert applied["action"] in ("ROTATE", "HOLD", "STOW"), applied
+          assert applied["appliedToRow"] is True and whatif["appliedToRow"] is False, (applied, whatif)
+          # An applied ROTATE or STOW moves the simulated row; a HOLD and a what-if question leave it.
+          expected = applied["targetAngleDeg"] if applied["action"] in ("ROTATE", "STOW") else applied["currentAngleDeg"]
+          assert row["angleDeg"] == expected, (row, applied)
+          assert stats["total"] == 2, stats
+          PY
+
+      - name: Reject an invalid request to the control service
+        run: |
+          status=$(curl -s -o error.json -w '%{http_code}' -X POST http://127.0.0.1:8080/api/decisions -H 'content-type: application/json' -d '{"currentAngleDeg": 500}')
+          cat error.json; echo
+          test "$status" = "422"
+
+      - name: Restart the control service and check the history survived
+        # Proves the history is in PostgreSQL, that the schema check passes on a second start,
+        # and that the image's own health check reports healthy.
+        run: |
+          docker restart control
+          for attempt in $(seq 1 60); do
+            if [ "$(docker inspect --format '{{.State.Health.Status}}' control)" = "healthy" ]; then break; fi
+            sleep 2
+          done
+          test "$(docker inspect --format '{{.State.Health.Status}}' control)" = "healthy" || { docker logs control; exit 1; }
+          curl -fsS http://127.0.0.1:8080/api/stats -o stats.json
+          cat stats.json; echo
+          python -c "import json; s = json.load(open('stats.json')); assert s['total'] == 2, s"
+
+      - name: Stop the containers
         if: always()
-        run: docker rm -f api || true
+        run: docker rm -f control db api || true
 
-      - name: Report image size
-        run: docker image inspect solar-ai-backend --format 'Image size {{.Size}} bytes'
+      - name: Report image sizes
+        run: |
+          docker image inspect solar-ai-backend --format 'Backend image {{.Size}} bytes'
+          docker image inspect solar-ai-control-service --format 'Control service image {{.Size}} bytes'
 
-      # Delivery: the image that just passed every step above is pushed, never a rebuilt one.
+      # Delivery: the images that just passed every step above are pushed, never rebuilt ones.
       # Pull requests stop before this point.
-      - name: Publish image to the GitHub container registry
+      - name: Publish images to the GitHub container registry
         if: github.event_name == 'push'
         env:
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          repository="ghcr.io/${GITHUB_REPOSITORY,,}"
           echo "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
           tags=("sha-${GITHUB_SHA::7}")
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then tags+=("$GITHUB_REF_NAME"); else tags+=("latest"); fi
-          for tag in "${tags[@]}"; do
-            docker tag solar-ai-backend "$image:$tag"
-            docker push "$image:$tag"
-            echo "Published $image:$tag" >> "$GITHUB_STEP_SUMMARY"
+          for pair in "solar-ai-backend=$repository" "solar-ai-control-service=$repository-control-service"; do
+            built="${pair%%=*}"
+            image="${pair#*=}"
+            for tag in "${tags[@]}"; do
+              docker tag "$built" "$image:$tag"
+              docker push "$image:$tag"
+              echo "Published $image:$tag" >> "$GITHUB_STEP_SUMMARY"
+            done
           done
 
   frontend:
