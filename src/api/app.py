@@ -7,7 +7,9 @@ Endpoints:
     GET  /health            process is up
     GET  /ready             models are loaded (503 until they are)
     GET  /models            the saved models and their validation metrics
-    GET  /hours             the recorded hours that can be replayed
+    GET  /hours             the recorded hours that can be replayed, and the days they fall on
+    GET  /hours/{day}       the replayable hours of one day
+    GET  /scenarios         named recorded hours picked by rule (sunniest, most overcast, windiest, night)
     POST /recommendations   one decision, as the same FrontendData the dashboard reads
 
 When SOLAR_API_KEY is set, every endpoint except /health and /ready needs that
@@ -25,7 +27,7 @@ import os
 from pathlib import Path
 from typing import Callable, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Path as PathParameter, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -36,7 +38,7 @@ import torch
 
 from src.agents.reasoning import load_reasoner
 from src.api.rate_limit import RateLimiter
-from src.api.service import InferenceService, RecordedHoursUnavailable, UnknownHour, load_recorded_hours
+from src.api.service import SCENARIO_WEATHER_FIELDS, InferenceService, RecordedHours, RecordedHoursUnavailable, UnknownHour, load_recorded_hours
 from src.common.config import DEFAULT_CONFIG
 from src.common.schema import ContractError
 from src.common.tool_contracts import ToolError
@@ -175,12 +177,32 @@ def create_app(
             "validation_comparison": comparison,
         }
 
-    @app.get("/hours", dependencies=protected)
-    def hours(request: Request) -> dict:
+    def hours_or_503(request: Request) -> RecordedHours:
         service = service_or_503(request)
         if service.hours is None:
             raise fail(503, "RECORDED_HOURS_UNAVAILABLE", f"Dataset {service.models.info.dataset_name} is not available on this server")
-        return {"count": len(service.hours.by_timestamp), "first": service.hours.first, "last": service.hours.last, "default": service.hours.default_timestamp}
+        return service.hours
+
+    @app.get("/hours", dependencies=protected)
+    def hours(request: Request) -> dict:
+        recorded = hours_or_503(request)
+        return {"count": len(recorded.by_timestamp), "first": recorded.first, "last": recorded.last, "default": recorded.default_timestamp, "days": recorded.days}
+
+    @app.get("/hours/{day}", dependencies=protected)
+    def hours_on(request: Request, day: str = PathParameter(pattern=r"^\d{4}-\d{2}-\d{2}$", description="A UTC date, YYYY-MM-DD.")) -> dict:
+        timestamps = hours_or_503(request).timestamps_on(day)
+        if not timestamps:
+            raise fail(404, "UNKNOWN_DAY", f"No recorded hours on {day}")
+        return {"day": day, "timestamps": timestamps}
+
+    @app.get("/scenarios", dependencies=protected)
+    def scenarios(request: Request) -> dict:
+        recorded = hours_or_503(request)
+        return {"scenarios": [
+            {"id": scenario.id, "label": scenario.label, "timestamp": scenario.timestamp,
+             "weather": {field: recorded.by_timestamp[scenario.timestamp][field] for field in SCENARIO_WEATHER_FIELDS}}
+            for scenario in recorded.scenarios
+        ]}
 
     @app.post("/recommendations", dependencies=protected)
     def recommend(body: RecommendationRequest, request: Request) -> dict:

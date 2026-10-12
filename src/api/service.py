@@ -21,6 +21,10 @@ from src.service.recommendation_service import recommend_for_recorded_hour
 
 
 CONTROL_TARGET_ID = "row-001"
+# A "daylight" scenario needs the sun clearly up, so its predictions are not all near zero.
+DAYLIGHT_MIN_ELEVATION_DEG = 10.0
+# The weather a caller is shown beside each scenario, so they can see why it was picked.
+SCENARIO_WEATHER_FIELDS = ("temperature_c", "cloud_cover_pct", "wind_speed_kmh", "wind_gust_kmh", "ghi_wm2", "sun_elevation_deg")
 
 
 class UnknownHour(LookupError):
@@ -32,6 +36,15 @@ class RecordedHoursUnavailable(RuntimeError):
 
 
 @dataclass(frozen=True)
+class Scenario:
+    """One recorded hour picked out by a rule over the data, never by hand."""
+
+    id: str
+    label: str
+    timestamp: str
+
+
+@dataclass(frozen=True)
 class RecordedHours:
     """The test-window hours a recorded request may replay."""
 
@@ -39,6 +52,17 @@ class RecordedHours:
     default_timestamp: str
     first: str
     last: str
+    # Hours whose gust is not below the wind speed; the dashboard's schema rejects the others.
+    displayable: tuple[str, ...] = ()
+    scenarios: tuple[Scenario, ...] = ()
+
+    @property
+    def days(self) -> list[str]:
+        """Every UTC date that has at least one displayable hour, in order."""
+        return sorted({timestamp[:10] for timestamp in self.displayable})
+
+    def timestamps_on(self, day: str) -> list[str]:
+        return [timestamp for timestamp in self.displayable if timestamp.startswith(day)]
 
 
 def load_recorded_hours(models: LoadedModels) -> RecordedHours | None:
@@ -52,7 +76,23 @@ def load_recorded_hours(models: LoadedModels) -> RecordedHours | None:
     # The dashboard rejects a gust below the wind speed, so the default avoids such hours when it can.
     consistent = [hour for hour in hours if hour["wind_gust_kmh"] >= hour["wind_speed_kmh"]] or hours
     default = max(consistent, key=lambda hour: hour["ghi_wm2"])
-    return RecordedHours({hour["timestamp"]: hour for hour in hours}, default["timestamp"], hours[0]["timestamp"], hours[-1]["timestamp"])
+    return RecordedHours(
+        {hour["timestamp"]: hour for hour in hours}, default["timestamp"], hours[0]["timestamp"], hours[-1]["timestamp"],
+        displayable=tuple(hour["timestamp"] for hour in consistent), scenarios=pick_scenarios(consistent),
+    )
+
+
+def pick_scenarios(hours: list[WeatherFeatures]) -> tuple[Scenario, ...]:
+    """Named hours chosen by fixed rules; a rule that matches no hour yields no scenario. Ties go to the earliest hour."""
+    daylight = [hour for hour in hours if hour["sun_elevation_deg"] >= DAYLIGHT_MIN_ELEVATION_DEG]
+    night = [hour for hour in hours if hour["sun_elevation_deg"] < 0]
+    picks = [
+        ("sunniest", "Sunniest hour", max(hours, key=lambda hour: hour["ghi_wm2"]) if hours else None),
+        ("overcast", "Most overcast daylight hour", max(daylight, key=lambda hour: hour["cloud_cover_pct"]) if daylight else None),
+        ("windiest", "Strongest wind gusts", max(hours, key=lambda hour: hour["wind_gust_kmh"]) if hours else None),
+        ("night", "Night", night[0] if night else None),
+    ]
+    return tuple(Scenario(identifier, label, hour["timestamp"]) for identifier, label, hour in picks if hour is not None)
 
 
 class InferenceService:
