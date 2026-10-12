@@ -37,7 +37,7 @@ Tests use the committed mock, example and seasonal-sample data. They never call 
 
 The images that are published are the exact ones the container steps just tested, not rebuilds. Pull requests are tested but never published. Publishing uses the workflow's own token; there are no stored secrets.
 
-Published means stored in the registry. The control service is not deployed anywhere. The API is deployed to Google Cloud Run only once the repository has been connected to a Google Cloud project; see [Hosting the API on Cloud Run](#hosting-the-api-on-cloud-run).
+Published means stored in the registry. The control service is not deployed anywhere. The API is deployed to Google Cloud Run on every push to `main`; see [Hosting the API on Cloud Run](#hosting-the-api-on-cloud-run).
 
 ### Releasing a version
 
@@ -69,9 +69,9 @@ Like the backend image, it has only been built and run in CI.
 
 ## Hosting the API on Cloud Run
 
-**Status: written, not yet run.** The deploy job and the setup script exist, but no Google Cloud project has been connected, so the job is skipped and the API is not hosted. Nothing in this section has been exercised yet.
+**Status: live** at https://solar-ai-api-363580008545.us-central1.run.app since 2026-10-12. `/health`, `/ready` and `/docs` are open; everything else needs the API key. Checked from outside after the first deployment: `/ready` answered, and `/models` and `/recommendations` answered 401 without a key. A request with the key has not been checked by anyone but the key's owner.
 
-How it is meant to work:
+How it works:
 
 1. **One-time setup.** In Google Cloud Shell, with a project that has billing enabled selected, run [`deploy/cloud-run-setup.sh`](../deploy/cloud-run-setup.sh). It creates an image repository, a deployer account and a runtime account, keyless sign-in that only this repository's `main` branch can use, and the API's secrets in Secret Manager (a generated `SOLAR_API_KEY` and, optionally, the Anthropic key). It prints six repository variables to add on GitHub. No cloud key is stored in GitHub.
 2. **Every push to `main`.** After the images are tested and published, the *Deploy API to Cloud Run* job copies the exact published API image into the project's registry, deploys it, and checks that `/ready` answers and that a request with no key gets 401.
@@ -85,7 +85,7 @@ Things to know:
 - **Recorded mode uses the seasonal sample**, because that is what the image is trained on. Its decisions differ from the full-dataset numbers in the README.
 - **Only the API is deployed.** The control service needs a PostgreSQL database and is not hosted.
 
-To stop deploying, delete the `GCP_PROJECT_ID` repository variable. To take the service down, delete it in the Cloud Run console.
+To read the key callers must send, run `gcloud secrets versions access latest --secret=solar-api-key` in Cloud Shell. To stop deploying, delete the `GCP_PROJECT_ID` repository variable. To take the service down, delete it in the Cloud Run console.
 
 ## The dashboard deployment
 
@@ -132,8 +132,8 @@ These apply to the laptop the project was built on, not to the project in genera
 
 ## Known gaps
 
-- The API's authentication is one shared key, off unless `SOLAR_API_KEY` is set. The control service has none on its own endpoints. Neither is hosted.
-- Nothing is deployed from the published images yet: the Cloud Run deployment is written but has never run.
+- The API's authentication is one shared key, off unless `SOLAR_API_KEY` is set. The control service has none on its own endpoints.
+- Only the API is hosted. The control service is not, and the dashboard does not call the hosted API.
 - There is no single command that starts every service together.
 - No measured test-coverage percentage.
 - No security review has been done of the code that accepts outside input.
