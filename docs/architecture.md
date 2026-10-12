@@ -1,6 +1,11 @@
 # Architecture / shared-contract proposal 0.1.0
 
-Status: **awaiting team approval**. This phase creates boundaries, fixtures,
+> **Historical document.** This is the proposal the team agreed on the first day. The data contracts it defines
+> (the 13 weather columns, `FrontendData`, the tool and agent interfaces, the decision priority) are still what the code
+> implements. Its status notes are not current: the agents, models, orchestrator, API and dashboard now exist.
+> For the system as it is today, see the [project README](../README.md) and the [documentation index](README.md).
+
+Status at the time of writing: **awaiting team approval**. This phase creates boundaries, fixtures,
 stubs and contract tests. It does not implement the application. No agent is
 running, no ML library is installed, and no API or hardware command is sent.
 
