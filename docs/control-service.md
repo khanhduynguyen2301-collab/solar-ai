@@ -113,7 +113,7 @@ The same envelope as the inference API: `{"error": {"code": "...", "message": ".
 | 500 | `INTERNAL_ERROR` | Unexpected failure; details are in the log only |
 | 502 | `INFERENCE_INVALID` | The inference API replied with something that is not a usable decision |
 | 503 | `INFERENCE_BUSY` | The inference API is rate limiting this service |
-| 503 | `INFERENCE_UNAVAILABLE` | The inference API is unreachable, not ready, or timed out |
+| 503 | `INFERENCE_UNAVAILABLE` | The inference API is unreachable, not ready, timed out, or refused this service's API key (the log says which) |
 
 ## Scheduler
 
@@ -126,6 +126,7 @@ In `live` mode every run currently ends in HOLD, because the inference API repor
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `SOLAR_INFERENCE_URL` | `http://localhost:8000` | Where the inference API is |
+| `SOLAR_INFERENCE_API_KEY` | none | Sent as `X-API-Key` on every call, for an inference API that requires a key |
 | `SOLAR_SCHEDULE_ENABLED` | `false` | Turn the scheduler on |
 | `SOLAR_SCHEDULE_CRON` | `0 5 * * * *` | When it runs (Spring cron, UTC) |
 | `SOLAR_SCHEDULE_MODE` | `live` | The mode it asks for |
@@ -148,11 +149,11 @@ cd control-service
 .\mvnw.cmd test
 ```
 
-37 tests: the decision flow on the real schema with only the inference API replaced; the HTTP client against a local test server, covering the request shape, status mapping and timeouts; the scheduler; and the error handling.
+41 tests: the decision flow on the real schema with only the inference API replaced; the HTTP client against a local test server, covering the request shape, status mapping and timeouts; the scheduler; and the error handling.
 
 ## Limits
 
 - **PostgreSQL is exercised in CI only.** The unit tests and manual runs use H2 in PostgreSQL-compatibility mode. On every CI run the container starts against a real PostgreSQL, applies the migration, stores two decisions and reads them back after a restart; nothing beyond that has been tried on PostgreSQL.
 - **Single instance only**, because of the in-memory lock on applied decisions.
-- **No authentication**, and it is not hosted.
+- **No authentication on its own endpoints**, and it is not hosted. It can send a key to the inference API, but anyone who can reach this service can use it.
 - **The dashboard does not read it yet.**

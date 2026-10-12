@@ -20,6 +20,9 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public class HttpInferenceClient implements InferenceClient {
 
+	private static final String API_KEY_HEADER = "X-API-Key";
+	private static final int UNAUTHORIZED = 401;
+	private static final int FORBIDDEN = 403;
 	private static final int TOO_MANY_REQUESTS = 429;
 
 	private final RestClient restClient;
@@ -30,9 +33,12 @@ public class HttpInferenceClient implements InferenceClient {
 		HttpClientSettings settings = HttpClientSettings.defaults()
 			.withConnectTimeout(inference.connectTimeout())
 			.withReadTimeout(inference.readTimeout());
-		this.restClient = builder.baseUrl(inference.baseUrl().toString())
-			.requestFactory(ClientHttpRequestFactoryBuilder.detect().build(settings))
-			.build();
+		RestClient.Builder configured = builder.baseUrl(inference.baseUrl().toString())
+			.requestFactory(ClientHttpRequestFactoryBuilder.detect().build(settings));
+		if (inference.hasApiKey()) {
+			configured = configured.defaultHeader(API_KEY_HEADER, inference.apiKey());
+		}
+		this.restClient = configured.build();
 		this.objectMapper = objectMapper;
 	}
 
@@ -80,12 +86,23 @@ public class HttpInferenceClient implements InferenceClient {
 		if (status.value() == TOO_MANY_REQUESTS) {
 			return Reason.RATE_LIMITED;
 		}
+		// A refused key is this service's configuration, not something the caller sent.
+		if (isRefusedKey(status)) {
+			return Reason.UNAVAILABLE;
+		}
 		// 404 (unknown hour) and 422 (invalid field) are the caller's mistake; everything else is the API's state.
 		return status.is4xxClientError() ? Reason.REJECTED : Reason.UNAVAILABLE;
 	}
 
+	private static boolean isRefusedKey(HttpStatusCode status) {
+		return status.value() == UNAUTHORIZED || status.value() == FORBIDDEN;
+	}
+
 	/** The inference API's own error message when it sent one in its envelope, otherwise just the status. */
 	private String describe(RestClientResponseException ex) {
+		if (isRefusedKey(ex.getStatusCode())) {
+			return "The inference API refused this service's API key (HTTP " + ex.getStatusCode().value() + "); check SOLAR_INFERENCE_API_KEY";
+		}
 		try {
 			JsonNode message = objectMapper.readTree(ex.getResponseBodyAsString()).path("error").path("message");
 			if (message.isString() && !message.asString().isBlank()) {

@@ -6,6 +6,8 @@ Start the server with its rate limit off, then run this against it:
     uvicorn src.api.app:app --port 8000
     python -m scripts.load_test
 
+If the server requires an API key, set SOLAR_API_KEY for this script as well.
+
 Each concurrency level sends the same number of POST /recommendations requests
 (recorded mode, no LLM) over keep-alive connections and records how long every
 one took. Results go to `data/evaluation/load_test.json`.
@@ -42,6 +44,13 @@ PERCENTILES = (50, 90, 95, 99)
 TIMEOUT_SECONDS = 30
 # Requests cycle through the candidate angles, so the server is not answering one repeated question.
 ANGLES = DEFAULT_CONFIG.candidate_angles_deg
+API_KEY_VARIABLE = "SOLAR_API_KEY"
+
+
+def _headers() -> dict[str, str]:
+    """Request headers, with the API key from the environment when one is set."""
+    key = os.environ.get(API_KEY_VARIABLE)
+    return {"content-type": "application/json", **({"x-api-key": key} if key else {})}
 
 
 def percentile(sorted_values: list[float], percent: float) -> float:
@@ -78,13 +87,13 @@ def _connect(url: str) -> http.client.HTTPConnection:
 
 def _worker(url: str, count: int, offset: int) -> tuple[list[float], list[int]]:
     """One client on one keep-alive connection, sending `count` requests one after another."""
-    connection, latencies, statuses = _connect(url), [], []
+    connection, latencies, statuses, headers = _connect(url), [], [], _headers()
     try:
         for index in range(count):
             body = json.dumps({"current_angle_deg": ANGLES[(offset + index) % len(ANGLES)]})
             start = time.perf_counter()
             try:
-                connection.request("POST", "/recommendations", body=body, headers={"content-type": "application/json"})
+                connection.request("POST", "/recommendations", body=body, headers=headers)
                 response = connection.getresponse()
                 response.read()
                 status = response.status
@@ -110,7 +119,7 @@ def run_level(url: str, total: int, concurrency: int) -> dict:
 def _get_json(url: str, path: str) -> dict:
     connection = _connect(url)
     try:
-        connection.request("GET", path)
+        connection.request("GET", path, headers=_headers())
         response = connection.getresponse()
         return {"status": response.status, **json.loads(response.read() or b"{}")}
     finally:

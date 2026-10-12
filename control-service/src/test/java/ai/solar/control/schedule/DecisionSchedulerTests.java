@@ -24,7 +24,7 @@ class DecisionSchedulerTests {
 
 	private final DecisionService service = mock(DecisionService.class);
 	private final SolarProperties properties = new SolarProperties(
-			new SolarProperties.Inference(URI.create("http://inference.test"), Duration.ofSeconds(1), Duration.ofSeconds(1)),
+			new SolarProperties.Inference(URI.create("http://inference.test"), Duration.ofSeconds(1), Duration.ofSeconds(1), null),
 			new SolarProperties.Row("row-001", 35), new SolarProperties.Schedule(true, "0 5 * * * *", "live"));
 	private final DecisionScheduler scheduler = new DecisionScheduler(service, properties);
 

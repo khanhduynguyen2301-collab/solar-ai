@@ -71,6 +71,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      # Not a secret: it protects nothing outside this job's throwaway containers.
+      CI_API_KEY: ci-throwaway-key-0123456789abcdef
     steps:
       - uses: actions/checkout@v4
 
@@ -107,6 +110,21 @@ jobs:
           cat error.json; echo
           test "$status" = "422"
 
+      - name: Require the API key when one is set
+        # A second API container that requires a key, as a hosted one would.
+        run: |
+          docker run -d --name api-keyed --network solar -p 8001:8000 -e SOLAR_API_KEY="$CI_API_KEY" solar-ai-backend
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8001/ready; then echo; break; fi
+            sleep 2
+          done
+          request() { curl -s -o keyed.json -w '%{http_code}' -X POST http://127.0.0.1:8001/recommendations -H 'content-type: application/json' "$@" -d '{}'; }
+          test "$(request)" = "401"
+          cat keyed.json; echo
+          test "$(request -H 'x-api-key: not-the-key-0123456789abcdef')" = "401"
+          test "$(request -H "x-api-key: $CI_API_KEY")" = "200"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8001/models)" = "401"
+
       - name: Load test the container
         # A short run to prove the script works against the image; the numbers in the README come from a longer local run.
         run: python -m scripts.load_test --requests 300 --concurrency 1 8 --output load_test_ci.json
@@ -126,7 +144,7 @@ jobs:
             control-service
 
       - name: Start PostgreSQL and the control service container
-        # The control service runs here against a real PostgreSQL and the API container started above.
+        # The control service runs here against a real PostgreSQL and the API container that requires a key.
         # The password exists only inside this job's throwaway network.
         run: |
           docker run -d --name db --network solar \
@@ -137,7 +155,7 @@ jobs:
             sleep 2
           done
           docker run -d --name control --network solar -p 8080:8080 \
-            -e SOLAR_INFERENCE_URL=http://api:8000 \
+            -e SOLAR_INFERENCE_URL=http://api-keyed:8000 -e SOLAR_INFERENCE_API_KEY="$CI_API_KEY" \
             -e SOLAR_DB_URL=jdbc:postgresql://db:5432/solar_farm_ai \
             -e SOLAR_DB_USER=solar_dev -e SOLAR_DB_PASSWORD=ci-throwaway \
             solar-ai-control-service
@@ -193,7 +211,7 @@ jobs:
 
       - name: Stop the containers
         if: always()
-        run: docker rm -f control db api || true
+        run: docker rm -f control db api api-keyed || true
 
       - name: Report image sizes
         run: |

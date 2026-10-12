@@ -16,8 +16,19 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties("solar")
 public record SolarProperties(@Valid @NotNull Inference inference, @Valid @NotNull Row row, @Valid @NotNull Schedule schedule) {
 
-	/** Where the Python inference API is, and how long to wait for it. */
-	public record Inference(@NotNull URI baseUrl, @NotNull Duration connectTimeout, @NotNull Duration readTimeout) {
+	/** Where the Python inference API is, how long to wait for it, and the key it expects (blank when it expects none). */
+	public record Inference(@NotNull URI baseUrl, @NotNull Duration connectTimeout, @NotNull Duration readTimeout, String apiKey) {
+
+		public boolean hasApiKey() {
+			return apiKey != null && !apiKey.isBlank();
+		}
+
+		/** The key is left out, so logging these settings can never print it. */
+		@Override
+		public String toString() {
+			return "Inference[baseUrl=" + baseUrl + ", connectTimeout=" + connectTimeout + ", readTimeout=" + readTimeout
+					+ ", apiKey=" + (hasApiKey() ? "<set>" : "<none>") + "]";
+		}
 	}
 
 	/** The controlled row and the angle its simulated position starts at. */
