@@ -75,7 +75,7 @@ The original system has three parts that meet at two contracts:
 - **Pipeline to backend:** rows with 13 fixed columns (weather, sun position, panel angle, energy label).
 - **Backend to dashboard:** one `FrontendData` JSON object, written to a file or returned by the API. The backend validates it before writing, and the dashboard validates it again with a matching Zod schema before showing anything.
 
-The dashboard is a static site: it reads the payload file at build time, so the deployed demo needs no server, database or API key. It does not call the API or the control service yet.
+The dashboard has two modes. On its own it is a static site: it reads the payload file at build time and needs no server, database or API key. Connected to the inference API (`SOLAR_API_URL` and `SOLAR_API_KEY` set on its server), every page gets a scenario bar: a visitor picks a recorded hour and the row's starting angle, runs the agents, and all pages show that run until they change it or go back to the recorded demo. The key stays on the dashboard's server and never reaches the browser. The dashboard does not call the control service.
 
 Two services were added on top:
 
@@ -203,7 +203,7 @@ Every pull request and every push to `main` runs both suites on GitHub Actions, 
 | Shared contracts | 30 | Every payload shape and its consistency rules |
 | End-to-end slice | 22 | Data to trained model to agents to a validated dashboard payload |
 
-**Frontend: 459 tests** (Vitest, 22 files): 396 logic and schema tests and 63 page and component render tests.
+**Frontend: 482 tests** (Vitest, 23 files): 419 logic and schema tests and 63 page and component render tests. The scenario bar's logic, the API client and the loader's fallback are tested; the bar itself was exercised in a real browser against a local API, not by an automated test.
 
 **Control service: 41 tests** (JUnit 5): the decision flow against a real database schema, the HTTP client against a local test server (request shape, status mapping, timeouts), the scheduler, and the error handling.
 
@@ -272,7 +272,7 @@ The saved set is about 24 MB. The API loads it at startup and verifies a checksu
 | Simulation | 143 ms | 230 ms | 67 KB |
 | Farm | 154 ms | 267 ms | 143 KB |
 
-The pages are static and served from Vercel's cache. Time for the browser to download and draw the 3D scene is not measured.
+Measured while the pages were static and served from Vercel's cache; per-visitor pages have not been measured. Time for the browser to download and draw the 3D scene is not measured.
 
 ## Run the demo
 
@@ -444,7 +444,7 @@ cd ..\control-service
 - The LSTM is not used in a live run because it needs look-back weather history.
 - The control service stores decision history, but the dashboard does not read it yet; its history list is still empty for generated runs.
 - The control service has no authentication on its own endpoints, is not hosted, and serializes applied decisions in memory, so it must run as a single instance.
-- The API's authentication is a single shared key (no per-user keys, expiry or revocation), and the hosted copy serves models trained on the seasonal sample; the live demo is still a static site showing one recorded run and does not call it.
+- The API's authentication is a single shared key (no per-user keys, expiry or revocation), and the hosted copy serves models trained on the seasonal sample; the dashboard can run scenarios against it once its two settings are added to the Vercel project.
 - The API's rate limiter is in memory per process, so with several worker processes each one counts separately.
 
 ## Repository guide

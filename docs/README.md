@@ -31,7 +31,7 @@ Start with the [project README](../README.md): it has the architecture diagram, 
 ## Where things run
 
 ```text
-dashboard (Next.js, port 3000)            reads one FrontendData JSON file at build time
+dashboard (Next.js, port 3000)      --->  the same inference API, for a visitor's scenario; else one JSON file
 control service (Java, port 8080)   --->  inference API (Python, port 8000)  --->  saved models
         |                                          |
         v                                          v
@@ -39,4 +39,4 @@ control service (Java, port 8080)   --->  inference API (Python, port 8000)  ---
    (PostgreSQL or H2)
 ```
 
-The dashboard does not call either service yet. The control service calls the inference API; nothing calls the control service except you.
+The dashboard calls the inference API when it is given its address and key; otherwise it shows one recorded file. It does not call the control service. The control service calls the inference API; nothing calls the control service except you.

@@ -1,10 +1,14 @@
 ﻿import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+import { cookies } from "next/headers";
+import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 
 import { frontendDataSchema } from "../schemas/frontend-data";
 import type { FrontendData } from "../types/solar";
+import { SCENARIO_COOKIE, parseScenario, scenarioFailureMessage, type Scenario } from "./scenario";
+import { SolarApiError, apiSettings, fetchRecommendation } from "./solar-api.server";
 
 const MOCK_FIXTURE_RELATIVE_PATH = [
   "data",
@@ -27,6 +31,10 @@ export type FrontendDataLoadResult =
       ok: true;
       data: FrontendData;
       sourcePath: string;
+      /** The visitor's own scenario when the data came from the live API; null for the recorded file. */
+      scenario: Scenario | null;
+      /** Why the visitor's scenario could not be shown and the recorded file is shown instead; otherwise null. */
+      notice: string | null;
     }
   | {
       ok: false;
@@ -157,14 +165,64 @@ export async function loadFrontendData(
   return parseFrontendData(raw);
 }
 
+/** The scenario this visitor chose, read from their cookie. Null outside a request, such as in a build or a test. */
+export async function currentScenario(): Promise<Scenario | null> {
+  try {
+    return parseScenario((await cookies()).get(SCENARIO_COOKIE)?.value);
+  } catch (error) {
+    // Next.js signals "this page depends on the request" by throwing; that must reach the framework.
+    unstable_rethrow(error);
+    return null;
+  }
+}
+
+/** One scenario from the live API, validated by the same schema as the recorded file. */
+export async function loadScenarioData(scenario: Scenario): Promise<FrontendData> {
+  const raw = await fetchRecommendation(scenario);
+  try {
+    return await parseFrontendData(raw);
+  } catch (error) {
+    if (error instanceof FrontendDataLoadError) {
+      throw new SolarApiError(error.message, null, "INVALID_PAYLOAD");
+    }
+    throw error;
+  }
+}
+
+/**
+ * What every page shows. With no argument: the visitor's own scenario from the live API when they
+ * have chosen one, otherwise the recorded file. If the live API fails, the recorded file is shown
+ * with a notice, never an error page. With a path: that file, as before.
+ */
 export async function loadFrontendDataResult(
-  filePath = resolveFrontendDataPath(),
+  filePath?: string,
+): Promise<FrontendDataLoadResult> {
+  if (filePath !== undefined) {
+    return loadFileResult(filePath, null);
+  }
+  const scenario = apiSettings() ? await currentScenario() : null;
+  if (!scenario) {
+    return loadFileResult(resolveFrontendDataPath(), null);
+  }
+  try {
+    return { ok: true, data: await loadScenarioData(scenario), sourcePath: "live API", scenario, notice: null };
+  } catch (error) {
+    const failure = error instanceof SolarApiError ? error : null;
+    return loadFileResult(resolveFrontendDataPath(), `${scenarioFailureMessage(failure)} Showing the recorded demo instead.`);
+  }
+}
+
+async function loadFileResult(
+  filePath: string,
+  notice: string | null,
 ): Promise<FrontendDataLoadResult> {
   try {
     return {
       ok: true,
       data: await loadFrontendData(filePath),
       sourcePath: filePath,
+      scenario: null,
+      notice,
     };
   } catch (error) {
     if (error instanceof FrontendDataLoadError) {
