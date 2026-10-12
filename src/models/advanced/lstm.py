@@ -14,6 +14,8 @@ flag the network sees. Missing history is never filled with invented weather.
 import copy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
+import pickle
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -144,6 +146,17 @@ class LstmPredictor:
     def __init__(self, network: _Network, scaler: FeatureScaler, history: HourlyHistory, sequence_length: int) -> None:
         self._network, self._scaler, self._history, self._sequence_length = network, scaler, history, sequence_length
 
+    def save(self, weights_path: Path) -> dict:
+        """Write the network weights and return everything else needed to rebuild the adapter, as plain JSON data."""
+        torch.save(self._network.state_dict(), weights_path)
+        return {
+            "sequence_length": self._sequence_length,
+            "hidden_size": self._network.lstm.hidden_size,
+            "scaler": {"mean": self._scaler.mean.tolist(), "std": self._scaler.std.tolist(), "target_scale": self._scaler.target_scale},
+            # Weather only, never labels: the hours the adapter may look back on at prediction time.
+            "history": [self._history[instant] for instant in sorted(self._history)],
+        }
+
     def without_history(self) -> "LstmPredictor":
         """The same trained network with an empty history store, as when no preceding hours are stored."""
         return LstmPredictor(self._network, self._scaler, {}, self._sequence_length)
@@ -178,6 +191,22 @@ def train_lstm(
     stop_targets = _to_tensor(label_vector(early_stopping_rows) / scaler.target_scale)
     network = _fit_network(fit_inputs, fit_targets, stop_inputs, stop_targets, config)
     return LstmPredictor(network, scaler, hourly_history(history_rows), config.sequence_length)
+
+
+def load_lstm(weights_path: Path, settings: dict) -> LstmPredictor:
+    """Restore an adapter from the weights file and the settings returned by `LstmPredictor.save`."""
+    try:
+        network = _Network(STEP_WIDTH, int(settings["hidden_size"]))
+        # weights_only: the file may hold tensors and nothing else, so loading it cannot run code.
+        network.load_state_dict(torch.load(weights_path, map_location="cpu", weights_only=True))
+        network.eval()
+        scaler = FeatureScaler(
+            mean=np.asarray(settings["scaler"]["mean"], dtype=np.float64), std=np.asarray(settings["scaler"]["std"], dtype=np.float64),
+            target_scale=float(settings["scaler"]["target_scale"]),
+        )
+        return LstmPredictor(network, scaler, hourly_history(settings["history"]), int(settings["sequence_length"]))
+    except (KeyError, TypeError, ValueError, RuntimeError, OSError, pickle.UnpicklingError) as exc:
+        raise ToolError(f"LSTM model could not be loaded from {weights_path.name}: {exc}") from exc
 
 
 def _shorten_history(windows: Windows, config: LstmConfig) -> Windows:
