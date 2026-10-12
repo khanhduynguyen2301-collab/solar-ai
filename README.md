@@ -188,7 +188,7 @@ This replay scores the selected model's choices with that model's own prediction
 
 Every pull request and every push to `main` runs both suites on GitHub Actions, plus a frontend type check, lint and production build, and then builds the two service images and runs them together over HTTP with a real PostgreSQL. Tests never call the LLM or the network.
 
-**Delivery.** On a push to `main` or a version tag (`v*`), the images that passed those steps are published to the GitHub container registry as `ghcr.io/khanhduynguyen2301-collab/solar-ai` (Python API) and `ghcr.io/khanhduynguyen2301-collab/solar-ai-control-service` (Java control service), tagged `latest` (or the version) and `sha-<commit>`. Pull requests are tested but never published. The dashboard is deployed separately by Vercel on every push to `main`.
+**Delivery.** On a push to `main` or a version tag (`v*`), the images that passed those steps are published to the GitHub container registry as `ghcr.io/khanhduynguyen2301-collab/solar-ai` (Python API) and `ghcr.io/khanhduynguyen2301-collab/solar-ai-control-service` (Java control service), tagged `latest` (or the version) and `sha-<commit>`. Pull requests are tested but never published. A push to `main` then deploys the API image to Google Cloud Run at https://solar-ai-api-363580008545.us-central1.run.app (an API key is required; see [docs/operations.md](docs/operations.md#hosting-the-api-on-cloud-run)). The dashboard is deployed separately by Vercel on every push to `main`.
 
 **Backend: 503 tests** (Python `unittest`)
 
@@ -444,7 +444,7 @@ cd ..\control-service
 - The LSTM is not used in a live run because it needs look-back weather history.
 - The control service stores decision history, but the dashboard does not read it yet; its history list is still empty for generated runs.
 - The control service has no authentication on its own endpoints, is not hosted, and serializes applied decisions in memory, so it must run as a single instance.
-- The API's authentication is a single shared key (no per-user keys, expiry or revocation), and it is not hosted publicly; the live demo is still a static site showing one recorded run.
+- The API's authentication is a single shared key (no per-user keys, expiry or revocation), and the hosted copy serves models trained on the seasonal sample; the live demo is still a static site showing one recorded run and does not call it.
 - The API's rate limiter is in memory per process, so with several worker processes each one counts separately.
 
 ## Repository guide
@@ -463,7 +463,7 @@ cd ..\control-service
 | `tests/` | Backend test suite |
 | `.github/workflows/ci.yml` | CI and delivery: backend, frontend and Java tests, then both service images built, run together and published |
 | `Dockerfile` | Backend image that serves the API |
-| `deploy/` | One-time Google Cloud setup for hosting the API on Cloud Run (written, not yet run) |
+| `deploy/` | One-time Google Cloud setup for hosting the API on Cloud Run |
 | `docs/` | Reference documentation; start at `docs/README.md` |
 
 ## Documentation
