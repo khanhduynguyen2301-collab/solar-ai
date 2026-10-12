@@ -8,7 +8,7 @@ A multi-agent system that decides, hour by hour, whether a row of solar panels
 should rotate to a new tilt angle. It weighs the predicted energy gain against
 the cost of moving, and a deterministic safety agent has the final word.
 
-Team: Luan (data pipeline), Duy (models, optimization, agents, backend), Tung (frontend).
+Built at a hackathon by a team of three: Luan (data pipeline), Duy (models, optimization, agents, backend), Tung (dashboard). The inference API, saved models, CI/CD, Docker image and Java control service were added afterwards by Duy in this repository, a fork of [the team's original](https://github.com/luanhoangle05/solar-ai).
 
 > **This is a prototype simulation.** No hardware is controlled. Energy labels
 > are physics-simulated, not measured production, and the movement and safety
@@ -26,6 +26,7 @@ Team: Luan (data pipeline), Duy (models, optimization, agents, backend), Tung (f
 - [What is real and what is simulated](#what-is-real-and-what-is-simulated)
 - [Known gaps](#known-gaps)
 - [Repository guide](#repository-guide)
+- [Documentation](#documentation)
 
 ## Overall architecture
 
@@ -45,17 +46,25 @@ flowchart LR
     L[LLM explanation with number check]
     P[/FrontendData JSON: validated payload/]
     UI[Next.js dashboard]
+    API[Inference API: FastAPI]
+    CS[Control service: Spring Boot]
+    DB[(Decision history)]
 
     W --> DA
-    D -- train and validate --> MA
+    D -- train once, save models --> MA
     SA --> P
-    P --> UI
+    P -- file --> UI
+    P --> API
+    API -- decision --> CS
+    CS --> DB
     O -. runs agents, merges results .-> Backend
     Backend -. recorded tool results .-> L
     L -. explanation text .-> P
 ```
 
-The system has three parts that meet at two contracts:
+The agents can be run three ways, all producing the same payload: a script that writes a file, an HTTP API that serves it from saved models, and a Java control service that calls the API on demand or on a schedule and keeps the history.
+
+The original system has three parts that meet at two contracts:
 
 | Part | Owner | What it does |
 | --- | --- | --- |
@@ -66,7 +75,14 @@ The system has three parts that meet at two contracts:
 - **Pipeline to backend:** rows with 13 fixed columns (weather, sun position, panel angle, energy label).
 - **Backend to dashboard:** one `FrontendData` JSON object, written to a file or returned by the API. The backend validates it before writing, and the dashboard validates it again with a matching Zod schema before showing anything.
 
-The dashboard is a static site: it reads the payload file at build time, so the deployed demo needs no server, database or API key.
+The dashboard is a static site: it reads the payload file at build time, so the deployed demo needs no server, database or API key. It does not call the API or the control service yet.
+
+Two services were added on top:
+
+| Service | What it does |
+| --- | --- |
+| Inference API (`src/api/`, Python) | Loads saved models at startup and returns a decision per request, so nothing is retrained |
+| Control service (`control-service/`, Java) | Requests decisions from the API, stores every one, tracks the simulated row position, and can run hourly |
 
 **Stack:** Python 3.11, PyTorch, XGBoost, FastAPI, pandas, pvlib · Java 21, Spring Boot, JPA, Flyway, PostgreSQL · Next.js, React, TypeScript, React Three Fiber, Zod · Anthropic API for explanations · GitHub Actions for CI · Vercel for the dashboard.
 
@@ -445,4 +461,13 @@ cd ..\control-service
 | `tests/` | Backend test suite |
 | `.github/workflows/ci.yml` | CI and delivery: backend tests, frontend checks, backend image build, smoke test and publish |
 | `Dockerfile` | Backend image that serves the API |
-| `docs/architecture.md` | Architecture, ownership and contract rules |
+| `docs/` | Reference documentation; start at `docs/README.md` |
+
+## Documentation
+
+| Document | What it covers |
+| --- | --- |
+| [docs/api.md](docs/api.md) | The inference API: endpoints, request and response shapes, errors, rate limits, settings |
+| [docs/control-service.md](docs/control-service.md) | The Java control service: what it stores, the simulated row position, endpoints, scheduler |
+| [docs/operations.md](docs/operations.md) | Training and saving models, CI and delivery, the Docker image, every environment variable |
+| [docs/README.md](docs/README.md) | Index of all documents, including the data pipeline and the original contract proposal |
