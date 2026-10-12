@@ -1,0 +1,13 @@
+# Only the wrapper settings, the build file and the sources go into the build.
+target
+data
+.git
+.gitignore
+.gitattributes
+.idea
+.vscode
+*.iml
+HELP.md
+mvnw.cmd
+Dockerfile
+.dockerignore
