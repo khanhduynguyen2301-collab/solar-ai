@@ -10,3 +10,8 @@ pandas==2.3.3
 pvlib==0.13.1
 psycopg[binary]==3.3.6
 requests==2.34.2
+
+# Duy: HTTP API that serves recommendations from saved models.
+fastapi==0.143.0
+uvicorn==0.54.0
+httpx==0.28.1  # used by FastAPI's test client only

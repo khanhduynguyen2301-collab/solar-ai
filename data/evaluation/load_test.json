@@ -1,0 +1,106 @@
+{
+  "measured_at": "2026-10-12T00:39:44Z",
+  "note": "The server and the load generator ran on the same machine, sharing its CPU. Recorded mode, no LLM. Not a capacity claim.",
+  "machine": {
+    "system": "Windows",
+    "machine": "AMD64",
+    "logical_cpus": 16,
+    "python": "3.11.9"
+  },
+  "server": {
+    "url": "http://127.0.0.1:8000",
+    "workers": 1,
+    "selected_model": "lstm",
+    "dataset": {
+      "name": "gem_2023_2025",
+      "dataset_kind": "LIVE",
+      "label_source": "physics-derived"
+    },
+    "trained_at": "2026-10-12T00:36:44Z"
+  },
+  "endpoint": "POST /recommendations",
+  "percentile_method": "nearest rank",
+  "warmup_requests": 50,
+  "levels": [
+    {
+      "concurrency": 1,
+      "requests": 2000,
+      "successful": 2000,
+      "failed": 0,
+      "status_counts": {
+        "200": 2000
+      },
+      "duration_s": 47.763,
+      "throughput_rps": 41.9,
+      "latency_ms": {
+        "p50": 23.58,
+        "p90": 24.87,
+        "p95": 25.41,
+        "p99": 28.79,
+        "mean": 23.86,
+        "min": 21.81,
+        "max": 118.8
+      }
+    },
+    {
+      "concurrency": 4,
+      "requests": 2000,
+      "successful": 2000,
+      "failed": 0,
+      "status_counts": {
+        "200": 2000
+      },
+      "duration_s": 33.841,
+      "throughput_rps": 59.1,
+      "latency_ms": {
+        "p50": 67.02,
+        "p90": 81.99,
+        "p95": 88.88,
+        "p99": 109.12,
+        "mean": 67.21,
+        "min": 26.02,
+        "max": 222.76
+      }
+    },
+    {
+      "concurrency": 16,
+      "requests": 2000,
+      "successful": 2000,
+      "failed": 0,
+      "status_counts": {
+        "200": 2000
+      },
+      "duration_s": 33.938,
+      "throughput_rps": 58.9,
+      "latency_ms": {
+        "p50": 274.64,
+        "p90": 318.2,
+        "p95": 329.22,
+        "p99": 401.04,
+        "mean": 270.17,
+        "min": 28.19,
+        "max": 450.85
+      }
+    },
+    {
+      "concurrency": 32,
+      "requests": 2000,
+      "successful": 2000,
+      "failed": 0,
+      "status_counts": {
+        "200": 2000
+      },
+      "duration_s": 33.705,
+      "throughput_rps": 59.3,
+      "latency_ms": {
+        "p50": 535.01,
+        "p90": 634.55,
+        "p95": 661.4,
+        "p99": 745.47,
+        "mean": 536.05,
+        "min": 69.82,
+        "max": 1077.74
+      }
+    }
+  ]
+}

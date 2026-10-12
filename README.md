@@ -1,6 +1,6 @@
 # Solar Farm AI Control System
 
-[![CI](https://github.com/luanhoangle05/solar-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/luanhoangle05/solar-ai/actions/workflows/ci.yml)
+[![CI](https://github.com/khanhduynguyen2301-collab/solar-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/khanhduynguyen2301-collab/solar-ai/actions/workflows/ci.yml)
 
 **Live demo:** https://solar-ai-chi.vercel.app (open the Simulation page for the agents, their reasoning and the 3D farm)
 
@@ -64,11 +64,11 @@ The system has three parts that meet at two contracts:
 | Dashboard (`frontend/`) | Tung | Reads one validated payload and shows the decision, the agents and the farm |
 
 - **Pipeline to backend:** rows with 13 fixed columns (weather, sun position, panel angle, energy label).
-- **Backend to dashboard:** one `FrontendData` JSON object. The backend validates it before writing, and the dashboard validates it again with a matching Zod schema before showing anything.
+- **Backend to dashboard:** one `FrontendData` JSON object, written to a file or returned by the API. The backend validates it before writing, and the dashboard validates it again with a matching Zod schema before showing anything.
 
 The dashboard is a static site: it reads the payload file at build time, so the deployed demo needs no server, database or API key.
 
-**Stack:** Python 3.11, PyTorch, XGBoost, pandas, pvlib · Next.js, React, TypeScript, React Three Fiber, Zod · Anthropic API for explanations · GitHub Actions for CI · Vercel for the dashboard.
+**Stack:** Python 3.11, PyTorch, XGBoost, FastAPI, pandas, pvlib · Next.js, React, TypeScript, React Three Fiber, Zod · Anthropic API for explanations · GitHub Actions for CI · Vercel for the dashboard.
 
 ## System design
 
@@ -170,14 +170,17 @@ This replay scores the selected model's choices with that model's own prediction
 
 ## Testing
 
-Every pull request and every push to `main` runs both suites on GitHub Actions, plus a frontend type check, lint and production build. Tests never call the LLM or the network.
+Every pull request and every push to `main` runs both suites on GitHub Actions, plus a frontend type check, lint and production build, and then builds the backend image and exercises it over HTTP. Tests never call the LLM or the network.
 
-**Backend: 449 tests** (Python `unittest`)
+**Delivery.** On a push to `main` or a version tag (`v*`), the image that passed those steps is published to the GitHub container registry as `ghcr.io/khanhduynguyen2301-collab/solar-ai`, tagged `latest` (or the version) and `sha-<commit>`. Pull requests are tested but never published. The dashboard is deployed separately by Vercel on every push to `main`.
+
+**Backend: 495 tests** (Python `unittest`)
 
 | Area | Tests | What is checked |
 | --- | --- | --- |
 | Agents, orchestrator, LLM reasoning, live Data Agent | 128 | Tool coordination, the decision rule (STOW, HOLD, ROTATE), failure routing, and that the LLM cannot change a result |
-| Models, evaluation and optimizer | 117 | Training smoke tests, no data leakage in LSTM sequences, metric math, model selection, net-benefit optimization |
+| Models, evaluation, optimizer and saved models | 131 | Training smoke tests, no data leakage in LSTM sequences, metric math, model selection, net-benefit optimization, and that a loaded model predicts exactly as the trained one and a damaged file is refused |
+| HTTP API | 32 | Valid payloads, strict input validation, the error envelope, rate limits, starting without models, and the load-test arithmetic |
 | Weather pipeline | 61 | Provider mapping, validation, transform, solar position |
 | Dataset loading and example data | 59 | Delivered splits are never re-split, chronological order, labels never used as features |
 | Database storage | 32 | PostgreSQL persistence; 23 of these skip when no database is running |
@@ -209,6 +212,21 @@ Measured with `python -m scripts.benchmark_latency` and stored in [data/evaluati
 | LSTM prediction for 7 angles, on its own | 0.64 ms | 100 |
 | Boosting prediction for 7 angles, on its own | 9.1 ms | 100 |
 
+**The API under load.** 2,000 `POST /recommendations` requests per row (recorded mode, LSTM selected, no LLM), measured with `python -m scripts.load_test` and stored in [data/evaluation/load_test.json](data/evaluation/load_test.json) and [load_test_4_workers.json](data/evaluation/load_test_4_workers.json). No request failed.
+
+| Server processes | Simultaneous clients | Requests per second | p50 | p95 | p99 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 1 | 42 | 23.6 ms | 25.4 ms | 28.8 ms |
+| 1 | 4 | 59 | 67.0 ms | 88.9 ms | 109.1 ms |
+| 1 | 16 | 59 | 274.6 ms | 329.2 ms | 401.0 ms |
+| 1 | 32 | 59 | 535.0 ms | 661.4 ms | 745.5 ms |
+| 4 | 1 | 44 | 22.5 ms | 24.8 ms | 26.5 ms |
+| 4 | 4 | 94 | 34.8 ms | 47.7 ms | 66.9 ms |
+| 4 | 16 | 127 | 98.6 ms | 205.1 ms | 274.8 ms |
+| 4 | 32 | 156 | 190.0 ms | 244.1 ms | 284.5 ms |
+
+What this shows: one process tops out near 59 requests per second however many clients connect, because the work is Python code that runs on one core at a time, so extra clients only queue. Four processes raise the ceiling to about 156 and cut the p99 at 32 clients from 746 ms to 285 ms. A request over HTTP takes about 23 ms against 7.4 ms in process; the difference is request parsing, building and validating the 50-row payload, and JSON encoding. The load generator ran on the same laptop and competed for its CPU, so these are not capacity figures.
+
 **External calls**, which dominate when they are used:
 
 | Step | Median | Range | Repeats |
@@ -218,13 +236,15 @@ Measured with `python -m scripts.benchmark_latency` and stored in [data/evaluati
 
 A run with explanations makes one LLM call per agent, in sequence, so it takes a few seconds; the decision itself is ready in milliseconds and does not wait for the LLM.
 
-**One-off setup** before any decision can be made:
+**One-off setup**, done once by `scripts.train_models` and then saved:
 
 | Step | Time |
 | --- | --- |
 | Train boosting (61,173 rows) | 18 s |
 | Train LSTM | 97 s |
 | Score all models on the 2024 validation year (61,376 rows) | 228 s |
+
+The saved set is about 24 MB. The API loads it at startup and verifies a checksum for every file, so no request ever trains or re-scores a model.
 
 **Live dashboard**, five requests per page from one location, HTML only:
 
@@ -293,25 +313,58 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 **Dataset.** The full 2023 to 2025 dataset is not committed; see [docs/full-dataset.md](docs/full-dataset.md). Without it, the committed seasonal sample is used, so your numbers will differ from the results above.
 
-### Option 4: generate a run with Docker
+### Option 4: run the API
 
-No Python setup needed. From the repository root:
+Train and save the models once, then serve decisions without retraining:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.train_models
+.\.venv\Scripts\python.exe -m uvicorn src.api.app:app --port 8000
+```
+
+Interactive documentation is at http://localhost:8000/docs.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /health` | The process is up |
+| `GET /ready` | Models are loaded (503 until they are) |
+| `GET /models` | The saved models, their validation metrics and the selected one |
+| `GET /hours` | The recorded hours that can be replayed |
+| `POST /recommendations` | One decision, as the same `FrontendData` the dashboard reads |
+
+```powershell
+curl.exe -X POST http://localhost:8000/recommendations -H "content-type: application/json" -d '{\"current_angle_deg\": 60}'
+```
+
+Request fields, all optional: `mode` (`recorded` or `live`), `timestamp` (a recorded hour from `/hours`), `current_angle_deg` (0 to 90, default 35) and `explain` (add LLM explanations; slower and needs an API key on the server).
+
+- **Errors** use one shape, `{"error": {"code", "message"}}`, and never include internals.
+- **Rate limits** are per client address: 120 requests a minute, and 6 a minute for `live` or `explain` requests, which call outside services. Change them with `SOLAR_API_RATE_LIMIT_PER_MINUTE` and `SOLAR_API_EXTERNAL_RATE_LIMIT_PER_MINUTE` (0 turns a limit off).
+- **Browser access** is allowed from `http://localhost:3000` only; set `SOLAR_API_CORS_ORIGINS` to change it.
+- **No authentication.** Put it behind your own gateway before exposing it publicly.
+
+### Option 5: run the API with Docker
+
+No Python setup needed. Run the image CI publishes from `main`:
+
+```powershell
+docker run --rm -p 8000:8000 ghcr.io/khanhduynguyen2301-collab/solar-ai:latest
+```
+
+Or build it yourself from the repository root:
 
 ```powershell
 docker build -t solar-ai-backend .
-docker run --rm -v "${PWD}/out:/out" solar-ai-backend
+docker run --rm -p 8000:8000 solar-ai-backend
 ```
 
-The result is written to `out/recommendation.json`. The image contains the code and the committed seasonal sample only: no API key and not the full dataset.
+The API is then at http://localhost:8000. The image trains its models at build time on the committed seasonal sample, so it starts ready. It contains no API key and not the full dataset.
 
-| To | Add |
+| To | Do |
 | --- | --- |
-| Get LLM explanations | `-e ANTHROPIC_API_KEY=sk-ant-...` before the image name |
-| Use the full dataset | `-v "<path to gem_2023_2025>:/app/data/generated/gem_2023_2025:ro"` before the image name |
-| Change the run | Options after the image name, for example `--angle 60 --output /out/recommendation.json` |
-| Write files as yourself on Linux | `--user "$(id -u):$(id -g)"` before the image name |
-
-Options given after the image name replace the defaults (`--skip-lstm --output /out/recommendation.json`), so include `--output /out/...` when you pass your own.
+| Get LLM explanations | Add `-e ANTHROPIC_API_KEY=sk-ant-...` before the image name |
+| Serve models trained on the full dataset | Train them locally, then add `-v "${PWD}/models/artifacts:/app/models/artifacts:ro"` and mount the dataset with `-v "<path to gem_2023_2025>:/app/data/generated/gem_2023_2025:ro"` |
+| Write one recommendation file instead of serving | `docker run --rm -v "${PWD}/out:/out" solar-ai-backend python -m scripts.run_recommendation --skip-lstm --output /out/recommendation.json` |
 
 ### Run the tests
 
@@ -344,7 +397,8 @@ npm test
 - Linear regression and random forest are not implemented.
 - The LSTM is not used in a live run because it needs look-back weather history.
 - There is no decision history yet; the dashboard's history list is empty for generated runs.
-- The live demo is deployed from a fork, so it does not update automatically when this repository changes.
+- The API has no authentication and is not hosted publicly; the live demo is still a static site showing one recorded run.
+- The API's rate limiter is in memory per process, so with several worker processes each one counts separately.
 
 ## Repository guide
 
@@ -354,10 +408,11 @@ npm test
 | `src/models/` | XGBoost and LSTM models, evaluation, cost simulation, optimizer |
 | `src/agents/` | The agents, orchestrator, trace recording and LLM reasoning |
 | `src/service/` | Recommendation service and the interim live Data Agent |
+| `src/api/` | HTTP API, request limits and the inference service |
 | `src/common/` | Shared contracts, schema and configuration |
 | `frontend/` | Next.js dashboard |
-| `scripts/` | Run, evaluation, tuning and data-building commands |
+| `scripts/` | Training, run, evaluation, benchmark, load-test and data-building commands |
 | `tests/` | Backend test suite |
-| `.github/workflows/ci.yml` | CI: backend tests, backend Docker image, frontend checks |
-| `Dockerfile` | Backend image that generates one agent recommendation |
+| `.github/workflows/ci.yml` | CI and delivery: backend tests, frontend checks, backend image build, smoke test and publish |
+| `Dockerfile` | Backend image that serves the API |
 | `docs/architecture.md` | Architecture, ownership and contract rules |

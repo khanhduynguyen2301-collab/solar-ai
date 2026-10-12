@@ -1,8 +1,11 @@
 name: CI
 
+# Every pull request is tested. A push to main, or a version tag such as v0.2.0, is tested and then
+# the backend image that passed is published to the GitHub container registry.
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -40,25 +43,81 @@ jobs:
 
   backend-image:
     name: Backend Docker image
+    # Waits for the test jobs, so an image is only ever published from a commit whose tests passed.
+    needs: [backend, frontend]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
       - name: Build image
-        run: docker build -t solar-ai-backend .
+        # The labels tie the published image to this repository and to the exact commit it was built from.
+        run: |
+          docker build -t solar-ai-backend \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.description=Solar Farm AI recommendation API" \
+            .
 
-      - name: Generate one recommendation in the container
-        # No API key and no network data: a recorded hour from the committed sample, templated explanations.
+      - name: Start the API container
+        run: |
+          docker run -d --name api -p 8000:8000 -e SOLAR_API_RATE_LIMIT_PER_MINUTE=0 solar-ai-backend
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/ready; then echo; exit 0; fi
+            sleep 2
+          done
+          docker logs api
+          exit 1
+
+      - name: Request a recommendation over HTTP
+        run: |
+          curl -fsS http://127.0.0.1:8000/models
+          echo
+          curl -fsS -X POST http://127.0.0.1:8000/recommendations -H 'content-type: application/json' -d '{"current_angle_deg": 60}' -o recommendation.json
+          python -c "import json; d = json.load(open('recommendation.json')); assert d['decision']['action'] in ('ROTATE', 'HOLD', 'STOW'), d['decision']; print(d['selected_model'], d['decision']['action'], d['decision']['target_angle_deg'])"
+
+      - name: Reject an invalid request
+        run: |
+          status=$(curl -s -o error.json -w '%{http_code}' -X POST http://127.0.0.1:8000/recommendations -H 'content-type: application/json' -d '{"current_angle_deg": 500}')
+          cat error.json; echo
+          test "$status" = "422"
+
+      - name: Load test the container
+        # A short run to prove the script works against the image; the numbers in the README come from a longer local run.
+        run: python -m scripts.load_test --requests 300 --concurrency 1 8 --output load_test_ci.json
+
+      - name: Generate one recommendation file with a one-off container
         run: |
           mkdir -p out
-          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/out:/out" solar-ai-backend --skip-lstm --no-llm --output /out/recommendation.json
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/out:/out" solar-ai-backend python -m scripts.run_recommendation --skip-lstm --no-llm --output /out/recommendation.json
+          python -c "import json; d = json.load(open('out/recommendation.json')); print(d['selected_model'], d['decision']['action'])"
 
-      - name: Check the result
-        run: python -c "import json; d = json.load(open('out/recommendation.json')); assert d['decision']['action'] in ('ROTATE', 'HOLD', 'STOW'), d['decision']; print(d['selected_model'], d['decision']['action'], d['decision']['target_angle_deg'])"
+      - name: Stop the API container
+        if: always()
+        run: docker rm -f api || true
 
       - name: Report image size
         run: docker image inspect solar-ai-backend --format 'Image size {{.Size}} bytes'
+
+      # Delivery: the image that just passed every step above is pushed, never a rebuilt one.
+      # Pull requests stop before this point.
+      - name: Publish image to the GitHub container registry
+        if: github.event_name == 'push'
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          tags=("sha-${GITHUB_SHA::7}")
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then tags+=("$GITHUB_REF_NAME"); else tags+=("latest"); fi
+          for tag in "${tags[@]}"; do
+            docker tag solar-ai-backend "$image:$tag"
+            docker push "$image:$tag"
+            echo "Published $image:$tag" >> "$GITHUB_STEP_SUMMARY"
+          done
 
   frontend:
     name: Frontend checks
