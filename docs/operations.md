@@ -89,7 +89,7 @@ To read the key callers must send, run `gcloud secrets versions access latest --
 
 ## The dashboard deployment
 
-Vercel builds `frontend/` from the fork's `main`. The pages are static: the payload file is read at build time. The Vercel project sets `SOLAR_FRONTEND_DATA=data/evaluation/demo_recommendation.json`; without it the dashboard shows the mock fixture.
+Vercel builds `frontend/` from the fork's `main`. Without `SOLAR_API_URL` the pages are static: the payload file is read at build time. With `SOLAR_API_URL` and `SOLAR_API_KEY` set in the Vercel project, pages are rendered per visitor: each shows the scenario stored in that visitor's cookie, fetched from the inference API by the dashboard's server, and falls back to the payload file with a notice if the API fails. Explanations are never requested for a visitor's run. The Vercel project sets `SOLAR_FRONTEND_DATA=data/evaluation/demo_recommendation.json`; without it the dashboard shows the mock fixture.
 
 ## Environment variables
 
@@ -109,6 +109,8 @@ Vercel builds `frontend/` from the fork's `main`. The pages are static: the payl
 | `SOLAR_SCHEDULE_ENABLED`, `SOLAR_SCHEDULE_CRON`, `SOLAR_SCHEDULE_MODE` | Control service | `false`, `0 5 * * * *`, `live` | Hourly automatic decisions |
 | `SOLAR_DB_URL`, `SOLAR_DB_USER`, `SOLAR_DB_PASSWORD` | Control service | local PostgreSQL | Its database |
 | `SOLAR_FRONTEND_DATA` | Dashboard | the mock fixture | Payload file to show, relative to the repository root |
+| `SOLAR_API_URL` | Dashboard | none | Address of the inference API. Setting it turns on the scenario bar |
+| `SOLAR_API_KEY` | Dashboard | none | The key the dashboard's server sends to the inference API; never sent to the browser |
 | `POSTGRES_*` | Data pipeline | see `.env.example` | The pipeline's PostgreSQL storage |
 
 Secrets belong in `.env` at the repository root, which is git-ignored. `.env.example` lists the names without values.
@@ -133,7 +135,7 @@ These apply to the laptop the project was built on, not to the project in genera
 ## Known gaps
 
 - The API's authentication is one shared key, off unless `SOLAR_API_KEY` is set. The control service has none on its own endpoints.
-- Only the API is hosted. The control service is not, and the dashboard does not call the hosted API.
+- Only the API is hosted; the control service is not. The dashboard's per-visitor mode has run locally but not yet on Vercel, where it depends on payload files being bundled with the server.
 - There is no single command that starts every service together.
 - No measured test-coverage percentage.
 - No security review has been done of the code that accepts outside input.
