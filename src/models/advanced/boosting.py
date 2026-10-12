@@ -1,6 +1,7 @@
 """Owner: Duy. XGBoost adapter behind the stable model ID `boosting`."""
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Sequence
 
 import xgboost as xgb
@@ -44,6 +45,17 @@ class BoostingPredictor:
 
     def __init__(self, booster: xgb.Booster, *, use_geometry_features: bool) -> None:
         self._booster, self._geometry = booster, use_geometry_features
+
+    @property
+    def use_geometry_features(self) -> bool:
+        return self._geometry
+
+    def save(self, path: Path) -> None:
+        """Write the trained booster (including its early-stopping round) as XGBoost JSON."""
+        try:
+            self._booster.save_model(str(path))
+        except xgb.core.XGBoostError as exc:
+            raise ToolError(f"Boosting model could not be saved: {exc}") from exc
 
     def predict_kwh(self, weather: WeatherFeatures, candidate_angles_deg: tuple[float, ...], *, metadata: Metadata) -> list[CandidatePrediction]:
         candidates = at_candidate_angles(weather, candidate_angles_deg)
@@ -89,6 +101,17 @@ def train_boosting(train_rows: Sequence[WeatherRow], early_stopping_rows: Sequen
     except xgb.core.XGBoostError as exc:
         raise ToolError(f"Boosting training failed: {exc}") from exc
     return BoostingPredictor(booster, use_geometry_features=config.use_geometry_features)
+
+
+def load_boosting(path: Path, *, use_geometry_features: bool) -> BoostingPredictor:
+    """Restore a booster written by `BoostingPredictor.save`; it predicts exactly as it did when saved."""
+    booster = xgb.Booster()
+    try:
+        booster.load_model(str(path))
+        booster.best_iteration  # noqa: B018 - a model saved without its early-stopping round cannot be used
+    except (xgb.core.XGBoostError, AttributeError, OSError) as exc:
+        raise ToolError(f"Boosting model could not be loaded from {path.name}: {exc}") from exc
+    return BoostingPredictor(booster, use_geometry_features=use_geometry_features)
 
 
 def _to_dmatrix(rows: Sequence[WeatherFeatures], labels=None, *, geometry: bool) -> xgb.DMatrix:
