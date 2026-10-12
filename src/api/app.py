@@ -93,7 +93,8 @@ def create_app(
     rate_limit_per_minute: int | None = None, external_rate_limit_per_minute: int | None = None, cors_origins: list[str] | None = None,
     api_key: str | None = None,
 ) -> FastAPI:
-    required_key = (os.environ.get(API_KEY_VARIABLE) or "") if api_key is None else api_key
+    # Surrounding whitespace is dropped: a secret store can add a trailing line break, which no request header can carry.
+    required_key = ((os.environ.get(API_KEY_VARIABLE) or "") if api_key is None else api_key).strip()
     if required_key and len(required_key) < MIN_API_KEY_LENGTH:
         raise ValueError(f"{API_KEY_VARIABLE} must be at least {MIN_API_KEY_LENGTH} characters")
     limiter = RateLimiter(_limit(RATE_LIMIT_VARIABLE, DEFAULT_RATE_LIMIT_PER_MINUTE) if rate_limit_per_minute is None else rate_limit_per_minute)

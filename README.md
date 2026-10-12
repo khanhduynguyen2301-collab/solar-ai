@@ -190,13 +190,13 @@ Every pull request and every push to `main` runs both suites on GitHub Actions, 
 
 **Delivery.** On a push to `main` or a version tag (`v*`), the images that passed those steps are published to the GitHub container registry as `ghcr.io/khanhduynguyen2301-collab/solar-ai` (Python API) and `ghcr.io/khanhduynguyen2301-collab/solar-ai-control-service` (Java control service), tagged `latest` (or the version) and `sha-<commit>`. Pull requests are tested but never published. A push to `main` then deploys the API image to Google Cloud Run at https://solar-ai-api-363580008545.us-central1.run.app (an API key is required; see [docs/operations.md](docs/operations.md#hosting-the-api-on-cloud-run)). The dashboard is deployed separately by Vercel on every push to `main`.
 
-**Backend: 511 tests** (Python `unittest`)
+**Backend: 512 tests** (Python `unittest`)
 
 | Area | Tests | What is checked |
 | --- | --- | --- |
 | Agents, orchestrator, LLM reasoning, live Data Agent | 128 | Tool coordination, the decision rule (STOW, HOLD, ROTATE), failure routing, and that the LLM cannot change a result |
 | Models, evaluation, optimizer and saved models | 131 | Training smoke tests, no data leakage in LSTM sequences, metric math, model selection, net-benefit optimization, and that a loaded model predicts exactly as the trained one and a damaged file is refused |
-| HTTP API | 48 | Valid payloads, strict input validation, the error envelope, the API key check, scenario and day listings, rate limits, starting without models, and the load-test arithmetic |
+| HTTP API | 49 | Valid payloads, strict input validation, the error envelope, the API key check, scenario and day listings, rate limits, starting without models, and the load-test arithmetic |
 | Weather pipeline | 61 | Provider mapping, validation, transform, solar position |
 | Dataset loading and example data | 59 | Delivered splits are never re-split, chronological order, labels never used as features |
 | Database storage | 32 | PostgreSQL persistence; 23 of these skip when no database is running |

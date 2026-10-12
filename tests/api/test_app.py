@@ -337,6 +337,12 @@ class ApiKeyTest(ApiTestCase):
     def test_with_no_key_configured_the_api_is_open(self) -> None:
         self.assertEqual(self.client().post("/recommendations", json={}).status_code, 200)
 
+    def test_a_line_break_stored_after_the_key_does_not_lock_every_caller_out(self) -> None:
+        client = self.client(api_key=API_KEY + "\n")
+
+        self.assertEqual(client.post("/recommendations", json={}, headers={"X-API-Key": API_KEY}).status_code, 200)
+        self.assertEqual(client.post("/recommendations", json={}).status_code, 401)
+
     def test_a_short_key_stops_the_server_from_starting(self) -> None:
         with self.assertRaisesRegex(ValueError, "SOLAR_API_KEY must be at least"):
             create_app(lambda: None, api_key="too-short")
