@@ -1,0 +1,725 @@
+{
+  "timestamp": "2026-10-04T12:12:25Z",
+  "metadata": {
+    "schema_version": "0.1.0",
+    "dataset_kind": "LIVE",
+    "label_source": "physics-derived",
+    "energy_scope": "row",
+    "prediction_horizon_minutes": 60,
+    "interval_start": "2025-06-05T19:00:00Z",
+    "control_target_id": "row-001",
+    "config_id": "prototype-row-hour-v1",
+    "assumptions": [
+      "Weather comes from the data pipeline; energy labels are physics-simulated for a reference row, not measured production. Model accuracy means agreement with that simulation.",
+      "kWh is for one 20-panel row over the hour starting at interval_start.",
+      "PROTOTYPE SIMULATION ASSUMPTIONS: movement and safety coefficients are not hardware-calibrated.",
+      "Model comparison metrics are computed on the chronological validation window; the test window is held out.",
+      "Control commands are simulation-only; no hardware is moved.",
+      "SIMULATED FARM SNAPSHOT: no row telemetry exists yet, so every row is shown READY at the control row's current angle.",
+      "No decision history is stored yet; the history list is empty rather than filled with examples."
+    ]
+  },
+  "current_weather": {
+    "temperature_c": 22.0,
+    "cloud_cover_pct": 0.0,
+    "precipitation_mm": 0.0,
+    "wind_speed_kmh": 5.0,
+    "wind_gust_kmh": 23.0,
+    "ghi_wm2": 941.0,
+    "dni_wm2": 834.4,
+    "dhi_wm2": 208.5
+  },
+  "data_agent": {
+    "status": "DEGRADED",
+    "source": "recorded:gem_2023_2025",
+    "forecast_age_minutes": 0.0,
+    "used_cache": false,
+    "issues": [
+      "Recorded dataset hour served as the current forecast; forecast age is assumed to be zero, not measured."
+    ]
+  },
+  "model_comparison": [
+    {
+      "model": "linear_regression",
+      "implementation": "linear_regression",
+      "status": "UNAVAILABLE",
+      "mae": null,
+      "rmse": null,
+      "r2": null
+    },
+    {
+      "model": "random_forest",
+      "implementation": "random_forest",
+      "status": "UNAVAILABLE",
+      "mae": null,
+      "rmse": null,
+      "r2": null
+    },
+    {
+      "model": "boosting",
+      "implementation": "xgboost",
+      "status": "VALIDATED",
+      "mae": 0.01678205741792269,
+      "rmse": 0.03582577278866594,
+      "r2": 0.9997754574740196
+    },
+    {
+      "model": "lstm",
+      "implementation": "pytorch",
+      "status": "VALIDATED",
+      "mae": 0.0048429121889635345,
+      "rmse": 0.009264698174611532,
+      "r2": 0.9999849834550535
+    }
+  ],
+  "selected_model": "lstm",
+  "candidate_predictions": [
+    {
+      "angle_deg": 30.0,
+      "predicted_kwh": 7.867307662963867
+    },
+    {
+      "angle_deg": 35.0,
+      "predicted_kwh": 7.844595432281494
+    },
+    {
+      "angle_deg": 40.0,
+      "predicted_kwh": 7.777985572814941
+    },
+    {
+      "angle_deg": 45.0,
+      "predicted_kwh": 7.666588306427002
+    },
+    {
+      "angle_deg": 50.0,
+      "predicted_kwh": 7.509589672088623
+    },
+    {
+      "angle_deg": 55.0,
+      "predicted_kwh": 7.306751728057861
+    },
+    {
+      "angle_deg": 60.0,
+      "predicted_kwh": 7.059109687805176
+    }
+  ],
+  "optimization": {
+    "current_angle_deg": 60.0,
+    "recommended_angle_deg": 30.0,
+    "baseline_kwh": 7.059109687805176,
+    "predicted_kwh": 7.867307662963867,
+    "energy_gain_kwh": 0.8081979751586914,
+    "movement_cost_kwh_equivalent": 0.09,
+    "net_benefit_kwh_equivalent": 0.7181979751586914
+  },
+  "safety": {
+    "passed": true,
+    "checks": [
+      {
+        "name": "wind_safety",
+        "passed": true,
+        "severity": "SEVERE",
+        "reason": "Wind 5 km/h and gust 23 km/h are within limits (50/70)"
+      },
+      {
+        "name": "angle_limits",
+        "passed": true,
+        "severity": "SEVERE",
+        "reason": "Target angle 30 deg is within [0, 90] deg"
+      },
+      {
+        "name": "data_freshness",
+        "passed": true,
+        "severity": "BLOCK_ROTATE",
+        "reason": "Data is DEGRADED and 0 min old (limit 30 min)"
+      },
+      {
+        "name": "angle_consistency",
+        "passed": true,
+        "severity": "BLOCK_ROTATE",
+        "reason": "All stages used the observed row angle 60 deg"
+      },
+      {
+        "name": "panel_status",
+        "passed": true,
+        "severity": "BLOCK_ROTATE",
+        "reason": "Row state READY can accept a command"
+      },
+      {
+        "name": "model_confidence",
+        "passed": true,
+        "severity": "BLOCK_ROTATE",
+        "reason": "Model lstm was evaluated (validation RMSE 0.009265 kWh, status VALIDATED)"
+      }
+    ],
+    "reason": "All 6 safety checks passed"
+  },
+  "decision": {
+    "action": "ROTATE",
+    "target_angle_deg": 30.0,
+    "reason": "Rotate to 30 deg: net benefit +0.7182 kWh-eq exceeds the 0.02 kWh-eq threshold and all safety checks passed."
+  },
+  "farm_status": {
+    "total_panels": 1000,
+    "zones": [
+      {
+        "zone_id": "zone-01",
+        "row_ids": [
+          "row-001",
+          "row-002",
+          "row-003",
+          "row-004",
+          "row-005",
+          "row-006",
+          "row-007",
+          "row-008",
+          "row-009",
+          "row-010",
+          "row-011",
+          "row-012",
+          "row-013"
+        ],
+        "panel_count": 260
+      },
+      {
+        "zone_id": "zone-02",
+        "row_ids": [
+          "row-014",
+          "row-015",
+          "row-016",
+          "row-017",
+          "row-018",
+          "row-019",
+          "row-020",
+          "row-021",
+          "row-022",
+          "row-023",
+          "row-024",
+          "row-025"
+        ],
+        "panel_count": 240
+      },
+      {
+        "zone_id": "zone-03",
+        "row_ids": [
+          "row-026",
+          "row-027",
+          "row-028",
+          "row-029",
+          "row-030",
+          "row-031",
+          "row-032",
+          "row-033",
+          "row-034",
+          "row-035",
+          "row-036",
+          "row-037",
+          "row-038"
+        ],
+        "panel_count": 260
+      },
+      {
+        "zone_id": "zone-04",
+        "row_ids": [
+          "row-039",
+          "row-040",
+          "row-041",
+          "row-042",
+          "row-043",
+          "row-044",
+          "row-045",
+          "row-046",
+          "row-047",
+          "row-048",
+          "row-049",
+          "row-050"
+        ],
+        "panel_count": 240
+      }
+    ],
+    "rows": [
+      {
+        "row_id": "row-001",
+        "zone_id": "zone-01",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "ROTATE"
+      },
+      {
+        "row_id": "row-002",
+        "zone_id": "zone-01",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-003",
+        "zone_id": "zone-01",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-004",
+        "zone_id": "zone-01",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-005",
+        "zone_id": "zone-01",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-006",
+        "zone_id": "zone-01",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-007",
+        "zone_id": "zone-01",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-008",
+        "zone_id": "zone-01",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-009",
+        "zone_id": "zone-01",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-010",
+        "zone_id": "zone-01",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-011",
+        "zone_id": "zone-01",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-012",
+        "zone_id": "zone-01",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-013",
+        "zone_id": "zone-01",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-014",
+        "zone_id": "zone-02",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-015",
+        "zone_id": "zone-02",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-016",
+        "zone_id": "zone-02",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-017",
+        "zone_id": "zone-02",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-018",
+        "zone_id": "zone-02",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-019",
+        "zone_id": "zone-02",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-020",
+        "zone_id": "zone-02",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-021",
+        "zone_id": "zone-02",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-022",
+        "zone_id": "zone-02",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-023",
+        "zone_id": "zone-02",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-024",
+        "zone_id": "zone-02",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-025",
+        "zone_id": "zone-02",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-026",
+        "zone_id": "zone-03",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-027",
+        "zone_id": "zone-03",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-028",
+        "zone_id": "zone-03",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-029",
+        "zone_id": "zone-03",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-030",
+        "zone_id": "zone-03",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-031",
+        "zone_id": "zone-03",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-032",
+        "zone_id": "zone-03",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-033",
+        "zone_id": "zone-03",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-034",
+        "zone_id": "zone-03",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-035",
+        "zone_id": "zone-03",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-036",
+        "zone_id": "zone-03",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-037",
+        "zone_id": "zone-03",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-038",
+        "zone_id": "zone-03",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-039",
+        "zone_id": "zone-04",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-040",
+        "zone_id": "zone-04",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-041",
+        "zone_id": "zone-04",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-042",
+        "zone_id": "zone-04",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-043",
+        "zone_id": "zone-04",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-044",
+        "zone_id": "zone-04",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-045",
+        "zone_id": "zone-04",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-046",
+        "zone_id": "zone-04",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-047",
+        "zone_id": "zone-04",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-048",
+        "zone_id": "zone-04",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-049",
+        "zone_id": "zone-04",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      },
+      {
+        "row_id": "row-050",
+        "zone_id": "zone-04",
+        "panel_count": 20,
+        "angle_deg": 60.0,
+        "current_state": "READY",
+        "action": "HOLD"
+      }
+    ]
+  },
+  "agent_log": [
+    {
+      "timestamp": "2026-10-04T12:12:25Z",
+      "agent": "data",
+      "action": "weather_received",
+      "result": "Recorded weather for 2025-06-05T19:00:00Z read from gem_2023_2025 (LIVE, labels physics-derived)"
+    },
+    {
+      "timestamp": "2026-10-04T12:12:25Z",
+      "agent": "data",
+      "action": "data_quality",
+      "result": "Recorded dataset hour served as the current forecast; forecast age is assumed to be zero, not measured."
+    },
+    {
+      "timestamp": "2026-10-04T12:16:08Z",
+      "agent": "modeling",
+      "action": "comparison",
+      "result": "Validation-window metrics in kWh. linear_regression: UNAVAILABLE; random_forest: UNAVAILABLE; boosting (xgboost): RMSE 0.03583, MAE 0.01678, R2 0.999775; lstm (pytorch): RMSE 0.009265, MAE 0.004843, R2 0.999985"
+    },
+    {
+      "timestamp": "2026-10-04T12:16:08Z",
+      "agent": "modeling",
+      "action": "selection",
+      "result": "Selected lstm (pytorch): lowest validation RMSE 0.009265 kWh among 2 of 4 available models; ties resolve in the order linear_regression, random_forest, boosting, lstm."
+    },
+    {
+      "timestamp": "2026-10-04T12:16:08Z",
+      "agent": "modeling",
+      "action": "prediction",
+      "result": "Predicted row energy for the next hour at 7 angles (stay angle 60 deg included): 30 deg -> 7.867 kWh; 35 deg -> 7.845 kWh; 40 deg -> 7.778 kWh; 45 deg -> 7.667 kWh; 50 deg -> 7.510 kWh; 55 deg -> 7.307 kWh; 60 deg -> 7.059 kWh"
+    },
+    {
+      "timestamp": "2026-10-04T12:16:10Z",
+      "agent": "modeling",
+      "action": "llm_reasoning",
+      "result": "The lstm model was selected as the best predictor because it achieved the lowest validation RMSE of 0.009265 kWh among the two available models, outperforming the boosting model's RMSE of 0.03583 kWh. This model then predicted energy output for seven candidate panel angles over the next hour, with the 30 deg angle yielding the highest predicted output at 7.867 kWh and output declining as angle increases toward the current 60 deg position at 7.059 kWh. The recommendation to adjust toward 30 deg follows from the superior predictive accuracy of the lstm model and these angle-dependent energy predictions."
+    },
+    {
+      "timestamp": "2026-10-04T12:16:10Z",
+      "agent": "optimization",
+      "action": "candidate_comparison",
+      "result": "Stay at 60 deg predicts 7.059 kWh. 30 deg -> 7.867 kWh, cost 0.090, net +0.718; 35 deg -> 7.845 kWh, cost 0.075, net +0.710; 40 deg -> 7.778 kWh, cost 0.060, net +0.659; 45 deg -> 7.667 kWh, cost 0.045, net +0.562; 50 deg -> 7.510 kWh, cost 0.030, net +0.420; 55 deg -> 7.307 kWh, cost 0.015, net +0.233; 60 deg -> 7.059 kWh, cost 0.000, net +0.000"
+    },
+    {
+      "timestamp": "2026-10-04T12:16:10Z",
+      "agent": "optimization",
+      "action": "recommendation",
+      "result": "Best net benefit is 30 deg: +0.808 kWh gain - 0.090 movement cost = +0.718 kWh-eq versus staying at 60 deg. The Manager Agent decides whether this clears safety and the threshold."
+    },
+    {
+      "timestamp": "2026-10-04T12:16:12Z",
+      "agent": "optimization",
+      "action": "llm_reasoning",
+      "result": "The tools evaluated seven candidate panel angles from thirty to sixty degrees against the current stay angle of sixty degrees. Moving the panels to thirty degrees is recommended because it yields the highest net benefit of +0.7182 kWh-eq, outweighing the movement cost of 0.0900 kWh-eq and delivering a predicted energy gain of 0.808 kWh compared to remaining at the current angle."
+    },
+    {
+      "timestamp": "2026-10-04T12:16:12Z",
+      "agent": "manager",
+      "action": "safety",
+      "result": "All 6 safety checks passed"
+    },
+    {
+      "timestamp": "2026-10-04T12:16:12Z",
+      "agent": "manager",
+      "action": "decision",
+      "result": "Rotate to 30 deg: net benefit +0.7182 kWh-eq exceeds the 0.02 kWh-eq threshold and all safety checks passed."
+    },
+    {
+      "timestamp": "2026-10-04T12:16:12Z",
+      "agent": "manager",
+      "action": "dispatch",
+      "result": "SIMULATION: Simulated ROTATE for row-001 to 30 deg; no hardware moved"
+    },
+    {
+      "timestamp": "2026-10-04T12:16:13Z",
+      "agent": "manager",
+      "action": "llm_reasoning",
+      "result": "All six safety checks passed, including wind conditions at 5 km/h with gust 23 km/h within the 50/70 km/h limits, target angle of 30 deg within bounds, and validated model confidence with RMSE 0.009265 kWh. The system simulated a ROTATE command for row-001 to 30 deg because the predicted net benefit of +0.7182 kWh-eq exceeds the 0.02 kWh-eq threshold and all safety requirements were satisfied."
+    }
+  ],
+  "history": [],
+  "errors": []
+}
