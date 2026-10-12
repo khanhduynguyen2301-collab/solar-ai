@@ -1,6 +1,6 @@
 # Solar Farm AI Control System
 
-[![CI](https://github.com/luanhoangle05/solar-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/luanhoangle05/solar-ai/actions/workflows/ci.yml)
+[![CI](https://github.com/khanhduynguyen2301-collab/solar-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/khanhduynguyen2301-collab/solar-ai/actions/workflows/ci.yml)
 
 **Live demo:** https://solar-ai-chi.vercel.app (open the Simulation page for the agents, their reasoning and the 3D farm)
 
