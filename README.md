@@ -1,6 +1,6 @@
 # Solar Farm AI Control System
 
-[![CI](https://github.com/luanhoangle05/solar-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/luanhoangle05/solar-ai/actions/workflows/ci.yml)
+[![CI](https://github.com/khanhduynguyen2301-collab/solar-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/khanhduynguyen2301-collab/solar-ai/actions/workflows/ci.yml)
 
 **Live demo:** https://solar-ai-chi.vercel.app (open the Simulation page for the agents, their reasoning and the 3D farm)
 
@@ -170,7 +170,9 @@ This replay scores the selected model's choices with that model's own prediction
 
 ## Testing
 
-Every pull request and every push to `main` runs both suites on GitHub Actions, plus a frontend type check, lint and production build. Tests never call the LLM or the network.
+Every pull request and every push to `main` runs both suites on GitHub Actions, plus a frontend type check, lint and production build, and then builds the backend image and exercises it over HTTP. Tests never call the LLM or the network.
+
+**Delivery.** On a push to `main` or a version tag (`v*`), the image that passed those steps is published to the GitHub container registry as `ghcr.io/khanhduynguyen2301-collab/solar-ai`, tagged `latest` (or the version) and `sha-<commit>`. Pull requests are tested but never published. The dashboard is deployed separately by Vercel on every push to `main`.
 
 **Backend: 495 tests** (Python `unittest`)
 
@@ -343,7 +345,13 @@ Request fields, all optional: `mode` (`recorded` or `live`), `timestamp` (a reco
 
 ### Option 5: run the API with Docker
 
-No Python setup needed. From the repository root:
+No Python setup needed. Run the image CI publishes from `main`:
+
+```powershell
+docker run --rm -p 8000:8000 ghcr.io/khanhduynguyen2301-collab/solar-ai:latest
+```
+
+Or build it yourself from the repository root:
 
 ```powershell
 docker build -t solar-ai-backend .
@@ -405,6 +413,6 @@ npm test
 | `frontend/` | Next.js dashboard |
 | `scripts/` | Training, run, evaluation, benchmark, load-test and data-building commands |
 | `tests/` | Backend test suite |
-| `.github/workflows/ci.yml` | CI: backend tests, backend Docker image, frontend checks |
+| `.github/workflows/ci.yml` | CI and delivery: backend tests, frontend checks, backend image build, smoke test and publish |
 | `Dockerfile` | Backend image that serves the API |
 | `docs/architecture.md` | Architecture, ownership and contract rules |

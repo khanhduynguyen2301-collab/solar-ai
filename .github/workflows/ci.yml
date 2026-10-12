@@ -1,8 +1,11 @@
 name: CI
 
+# Every pull request is tested. A push to main, or a version tag such as v0.2.0, is tested and then
+# the backend image that passed is published to the GitHub container registry.
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -40,13 +43,24 @@ jobs:
 
   backend-image:
     name: Backend Docker image
+    # Waits for the test jobs, so an image is only ever published from a commit whose tests passed.
+    needs: [backend, frontend]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
       - name: Build image
-        run: docker build -t solar-ai-backend .
+        # The labels tie the published image to this repository and to the exact commit it was built from.
+        run: |
+          docker build -t solar-ai-backend \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.description=Solar Farm AI recommendation API" \
+            .
 
       - name: Start the API container
         run: |
@@ -87,6 +101,23 @@ jobs:
 
       - name: Report image size
         run: docker image inspect solar-ai-backend --format 'Image size {{.Size}} bytes'
+
+      # Delivery: the image that just passed every step above is pushed, never a rebuilt one.
+      # Pull requests stop before this point.
+      - name: Publish image to the GitHub container registry
+        if: github.event_name == 'push'
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          tags=("sha-${GITHUB_SHA::7}")
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then tags+=("$GITHUB_REF_NAME"); else tags+=("latest"); fi
+          for tag in "${tags[@]}"; do
+            docker tag solar-ai-backend "$image:$tag"
+            docker push "$image:$tag"
+            echo "Published $image:$tag" >> "$GITHUB_STEP_SUMMARY"
+          done
 
   frontend:
     name: Frontend checks
