@@ -102,6 +102,8 @@ jobs:
         run: |
           curl -fsS http://127.0.0.1:8000/models
           echo
+          curl -fsS http://127.0.0.1:8000/scenarios
+          echo
           curl -fsS -X POST http://127.0.0.1:8000/recommendations -H 'content-type: application/json' -d '{"current_angle_deg": 60}' -o recommendation.json
           python -c "import json; d = json.load(open('recommendation.json')); assert d['decision']['action'] in ('ROTATE', 'HOLD', 'STOW'), d['decision']; print(d['selected_model'], d['decision']['action'], d['decision']['target_angle_deg'])"
 

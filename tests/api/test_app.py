@@ -83,6 +83,12 @@ class ApiTestCase(unittest.TestCase):
         self.addCleanup(client.__exit__, None, None, None)
         return client
 
+    def assert_error(self, response, status: int, code: str) -> dict:
+        self.assertEqual(response.status_code, status)
+        self.assertEqual(set(response.json()), {"error"})
+        self.assertEqual(response.json()["error"]["code"], code)
+        return response.json()["error"]
+
 
 class StatusEndpointsTest(ApiTestCase):
     def test_health_reports_the_process_is_up(self) -> None:
@@ -188,12 +194,6 @@ class RecommendationTest(ApiTestCase):
 
 
 class RejectedRequestsTest(ApiTestCase):
-    def assert_error(self, response, status: int, code: str) -> dict:
-        self.assertEqual(response.status_code, status)
-        self.assertEqual(set(response.json()), {"error"})
-        self.assertEqual(response.json()["error"]["code"], code)
-        return response.json()["error"]
-
     def test_unknown_hour_is_not_found(self) -> None:
         error = self.assert_error(self.client().post("/recommendations", json={"timestamp": "1999-01-01T00:00:00Z"}), 404, "UNKNOWN_HOUR")
 
@@ -348,3 +348,67 @@ class ApiKeyTest(ApiTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("x-api-key", response.headers["access-control-allow-headers"].lower())
+
+
+class ScenarioEndpointsTest(ApiTestCase):
+    def test_hours_lists_the_days_that_can_be_replayed(self) -> None:
+        days = self.client().get("/hours").json()["days"]
+
+        self.assertEqual(days, sorted(set(days)))
+        self.assertEqual(days, sorted({timestamp[:10] for timestamp in self.hours.displayable}))
+
+    def test_one_day_lists_only_its_displayable_hours(self) -> None:
+        day = self.hours.default_timestamp[:10]
+
+        body = self.client().get(f"/hours/{day}").json()
+
+        self.assertEqual(body["day"], day)
+        self.assertIn(self.hours.default_timestamp, body["timestamps"])
+        for timestamp in body["timestamps"]:
+            hour = self.hours.by_timestamp[timestamp]
+            self.assertTrue(timestamp.startswith(day))
+            self.assertGreaterEqual(hour["wind_gust_kmh"], hour["wind_speed_kmh"])
+
+    def test_a_day_with_no_hours_is_not_found(self) -> None:
+        self.assert_error(self.client().get("/hours/1999-01-01"), 404, "UNKNOWN_DAY")
+
+    def test_a_malformed_day_is_rejected(self) -> None:
+        self.assert_error(self.client().get("/hours/next-tuesday"), 422, "INVALID_REQUEST")
+
+    def test_every_scenario_is_a_replayable_hour_that_matches_its_rule(self) -> None:
+        scenarios = {scenario["id"]: scenario for scenario in self.client().get("/scenarios").json()["scenarios"]}
+        displayable = [self.hours.by_timestamp[timestamp] for timestamp in self.hours.displayable]
+
+        self.assertEqual(scenarios["sunniest"]["weather"]["ghi_wm2"], max(hour["ghi_wm2"] for hour in displayable))
+        self.assertEqual(scenarios["windiest"]["weather"]["wind_gust_kmh"], max(hour["wind_gust_kmh"] for hour in displayable))
+        self.assertLess(scenarios["night"]["weather"]["sun_elevation_deg"], 0)
+        self.assertGreaterEqual(scenarios["overcast"]["weather"]["sun_elevation_deg"], 10)
+        for scenario in scenarios.values():
+            self.assertIn(scenario["timestamp"], self.hours.displayable)
+            self.assertEqual(scenario["weather"]["ghi_wm2"], self.hours.by_timestamp[scenario["timestamp"]]["ghi_wm2"])
+
+    def test_a_scenario_can_be_replayed(self) -> None:
+        client = self.client()
+        scenario = client.get("/scenarios").json()["scenarios"][0]
+
+        response = client.post("/recommendations", json={"timestamp": scenario["timestamp"]})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["metadata"]["interval_start"], scenario["timestamp"])
+
+    def test_a_rule_that_matches_no_hour_yields_no_scenario(self) -> None:
+        from src.api.service import pick_scenarios
+
+        always_day = [{**hour, "sun_elevation_deg": 40.0} for hour in list(self.hours.by_timestamp.values())[:5]]
+
+        self.assertNotIn("night", [scenario.id for scenario in pick_scenarios(always_day)])
+        self.assertEqual(pick_scenarios([]), ())
+
+    def test_scenarios_and_days_need_the_key_and_the_dataset(self) -> None:
+        keyed = self.client(api_key=API_KEY)
+        without_dataset = self.client(hours=None)
+
+        self.assertEqual(keyed.get("/scenarios").status_code, 401)
+        self.assertEqual(keyed.get("/hours/2025-01-15").status_code, 401)
+        self.assert_error(without_dataset.get("/scenarios"), 503, "RECORDED_HOURS_UNAVAILABLE")
+        self.assert_error(without_dataset.get("/hours/2025-01-15"), 503, "RECORDED_HOURS_UNAVAILABLE")

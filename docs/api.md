@@ -20,10 +20,25 @@ Add `--workers 4` for more throughput; see [Throughput](#throughput). If no save
 | `GET /health` | The process is up. Always `{"status": "ok"}` | No |
 | `GET /ready` | Models are loaded; also says whether recorded hours and explanations are available | No |
 | `GET /models` | When the models were trained, on which dataset, their validation metrics, and the selected model | No |
-| `GET /hours` | Count, first, last and default of the recorded hours that can be replayed | No |
+| `GET /hours` | Count, first, last and default of the recorded hours that can be replayed, and the list of days (`days`) that have any | No |
+| `GET /hours/{day}` | The replayable hours of one UTC day (`YYYY-MM-DD`). 404 `UNKNOWN_DAY` if it has none | No |
+| `GET /scenarios` | Named recorded hours picked by fixed rules, each with the weather that got it picked | No |
 | `POST /recommendations` | One decision | Yes |
 
-When the server has an API key set, `/models`, `/hours` and `/recommendations` need it; see [Authentication](#authentication).
+When the server has an API key set, `/models`, `/hours`, `/scenarios` and `/recommendations` need it; see [Authentication](#authentication).
+
+### GET /scenarios
+
+For a caller that wants interesting hours without knowing the dataset. Each is chosen by a rule over the recorded hours, never by hand, and a rule that matches no hour is left out:
+
+| `id` | Rule |
+| --- | --- |
+| `sunniest` | Highest global irradiance (also the default hour) |
+| `overcast` | Highest cloud cover among hours with the sun at least 10 degrees up |
+| `windiest` | Highest wind gust. This is not necessarily above the stow limit |
+| `night` | The first hour with the sun below the horizon |
+
+Ties go to the earliest hour. Days and scenarios only include hours whose gust is not below the wind speed, because the dashboard's schema rejects the others; such hours can still be replayed by timestamp.
 
 ### POST /recommendations
 
@@ -72,6 +87,7 @@ Every error has one shape and never includes internal details:
 | --- | --- | --- |
 | 401 | `UNAUTHORIZED` | The server requires an API key and the `X-API-Key` header is missing or wrong |
 | 404 | `UNKNOWN_HOUR` | `timestamp` is not a recorded hour |
+| 404 | `UNKNOWN_DAY` | `/hours/{day}` was asked for a day with no recorded hours |
 | 404, 405 | `HTTP_ERROR` | Unknown route or wrong method |
 | 422 | `INVALID_REQUEST` | A field is missing, out of range, of the wrong type, or unknown; or the body is not JSON |
 | 429 | `RATE_LIMITED` | Too many requests; the `Retry-After` header says how long to wait |
@@ -85,7 +101,7 @@ Every error has one shape and never includes internal details:
 
 One shared API key, off by default:
 
-- Set `SOLAR_API_KEY` on the server (24 characters or more; a shorter one stops the server from starting). Every request to `/models`, `/hours` and `/recommendations` must then send it in an `X-API-Key` header, or it gets 401.
+- Set `SOLAR_API_KEY` on the server (24 characters or more; a shorter one stops the server from starting). Every request to anything except `/health`, `/ready` and `/docs` must then send it in an `X-API-Key` header, or it gets 401.
 - `/health` and `/ready` stay open so a host can probe them. The interactive documentation at `/docs` also stays open; it describes the API but cannot call it without the key.
 - With no key set, the API is open to anyone who can reach it, and the server logs a warning at startup. That is meant for local use.
 - A request without a valid key is refused before it is counted against the rate limit.
