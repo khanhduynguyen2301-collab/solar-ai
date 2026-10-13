@@ -77,7 +77,8 @@ if gcloud secrets describe "$API_KEY_SECRET" >/dev/null 2>&1; then
   echo "Keeping the existing $API_KEY_SECRET."
 else
   # A new random key that callers of the hosted API must send in X-API-Key. It is not printed.
-  openssl rand -base64 48 | tr -d '=+/\n' | cut -c1-43 | gcloud secrets create "$API_KEY_SECRET" --replication-policy=automatic --data-file=-
+  # printf, not a pipe from cut: the stored value must not end in a line break, or no request header can match it.
+  printf '%s' "$(openssl rand -base64 48 | tr -d '=+/\n' | cut -c1-43)" | gcloud secrets create "$API_KEY_SECRET" --replication-policy=automatic --data-file=-
 fi
 gcloud secrets add-iam-policy-binding "$API_KEY_SECRET" --member="serviceAccount:$RUNTIME_EMAIL" --role="roles/secretmanager.secretAccessor" >/dev/null
 

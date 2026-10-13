@@ -15,6 +15,9 @@ const REQUEST_TIMEOUT_MS = 25_000;
 const RECOMMENDATION_TTL_MS = 5 * 60 * 1000;
 const LISTING_TTL_MS = 10 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 300;
+// A hosted API that has gone idle refuses or drops the first requests while it starts, so those are tried again.
+const WAKE_UP_RETRIES = 2;
+const WAKE_UP_RETRY_DELAY_MS = 3_000;
 
 export class SolarApiError extends Error {
   constructor(message: string, readonly status: number | null, readonly code: string | null) {
@@ -34,7 +37,26 @@ export function apiSettings(environment: Record<string, string | undefined> = pr
 
 const errorEnvelopeSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
 
-async function request(path: string, init: { method: "GET" | "POST"; body?: unknown } = { method: "GET" }): Promise<unknown> {
+type RequestInitLite = { method: "GET" | "POST"; body?: unknown };
+
+/** True for failures that look like a service still starting: unreachable, a gateway error, or a refusal that is not the API's own. */
+export function looksLikeWakingUp(error: unknown): boolean {
+  if (!(error instanceof SolarApiError) || error.code !== null) return false;
+  return error.status === null || error.status === 429 || error.status >= 500;
+}
+
+async function request(path: string, init: RequestInitLite = { method: "GET" }, retryDelayMs = WAKE_UP_RETRY_DELAY_MS): Promise<unknown> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await requestOnce(path, init);
+    } catch (error) {
+      if (attempt >= WAKE_UP_RETRIES || !looksLikeWakingUp(error)) throw error;
+      await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+    }
+  }
+}
+
+async function requestOnce(path: string, init: RequestInitLite): Promise<unknown> {
   const settings = apiSettings();
   if (!settings) throw new SolarApiError("The live API is not configured", null, "NOT_CONFIGURED");
   let response: Response;
