@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { loadFrontendDataResult, resolveMockFrontendDataPath } from "./frontend-data.server";
 import { describePresetWeather, describeScenario, initialDayFor, initialHourFor, parseScenario, scenarioFailureMessage, serializeScenario, type ScenarioPreset } from "./scenario";
-import { SolarApiError, apiSettings, clearSolarApiCache, fetchDayHours, fetchPresets, fetchRecommendation } from "./solar-api.server";
+import { SolarApiError, apiSettings, clearSolarApiCache, fetchDayHours, fetchPresets, fetchRecommendation, looksLikeWakingUp } from "./solar-api.server";
 
 const SCENARIO = { timestamp: "2025-06-05T19:00:00Z", angle: 60 };
 const PRESET: ScenarioPreset = {
@@ -117,11 +117,44 @@ describe("live API client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("reports an unreachable API without a status", async () => {
+  it("reports an unreachable API without a status, after trying again", async () => {
     vi.stubEnv("SOLAR_API_URL", "https://api.example");
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed"); }));
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => { throw new TypeError("fetch failed"); });
+    vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchRecommendation(SCENARIO)).rejects.toMatchObject({ status: null, code: null });
+    const outcome = expect(fetchRecommendation(SCENARIO)).rejects.toMatchObject({ status: null, code: null });
+    await vi.runAllTimersAsync();
+    await outcome;
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
+  });
+
+  it("tries again only for failures that look like a service still starting", () => {
+    expect(looksLikeWakingUp(new SolarApiError("unreachable", null, null))).toBe(true);
+    expect(looksLikeWakingUp(new SolarApiError("gateway", 503, null))).toBe(true);
+    expect(looksLikeWakingUp(new SolarApiError("no instance", 429, null))).toBe(true);
+    expect(looksLikeWakingUp(new SolarApiError("our own limit", 429, "RATE_LIMITED"))).toBe(false);
+    expect(looksLikeWakingUp(new SolarApiError("bad key", 401, "UNAUTHORIZED"))).toBe(false);
+    expect(looksLikeWakingUp(new SolarApiError("unknown hour", 404, "UNKNOWN_HOUR"))).toBe(false);
+    expect(looksLikeWakingUp(new SolarApiError("not configured", null, "NOT_CONFIGURED"))).toBe(false);
+    expect(looksLikeWakingUp(new Error("something else"))).toBe(false);
+  });
+
+  it("gets an answer from an API that refuses the first request while it starts", async () => {
+    vi.stubEnv("SOLAR_API_URL", "https://api.example");
+    vi.useFakeTimers();
+    const replies = [new Response("starting", { status: 503 }), new Response(JSON.stringify({ timestamps: ["2025-06-05T19:00:00Z"] }), { status: 200 })];
+    const fetchMock = vi.fn(async () => replies.shift() as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const hours = fetchDayHours("2025-06-05");
+    await vi.runAllTimersAsync();
+
+    await expect(hours).resolves.toEqual(["2025-06-05T19:00:00Z"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 
   it("refuses to call anything when no API is configured", async () => {

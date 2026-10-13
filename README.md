@@ -203,7 +203,7 @@ Every pull request and every push to `main` runs both suites on GitHub Actions, 
 | Shared contracts | 30 | Every payload shape and its consistency rules |
 | End-to-end slice | 22 | Data to trained model to agents to a validated dashboard payload |
 
-**Frontend: 482 tests** (Vitest, 23 files): 419 logic and schema tests and 63 page and component render tests. The scenario bar's logic, the API client and the loader's fallback are tested; the bar itself was exercised in a real browser against a local API, not by an automated test.
+**Frontend: 484 tests** (Vitest, 23 files): 421 logic and schema tests and 63 page and component render tests. The scenario bar's logic, the API client and the loader's fallback are tested; the bar itself was exercised in a real browser against a local API, not by an automated test.
 
 **Control service: 41 tests** (JUnit 5): the decision flow against a real database schema, the HTTP client against a local test server (request shape, status mapping, timeouts), the scheduler, and the error handling.
 
